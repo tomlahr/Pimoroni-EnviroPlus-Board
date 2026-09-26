@@ -15,6 +15,7 @@ It measures temperature, humidity, air pressure, gas resistance, light and sound
 - [Calibration](#calibration)
 - [Watchdog](#watchdog)
 - [Files](#files)
+- [Related project](#related-project)
 - [License](#license)
 
 ## Features
