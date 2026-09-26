@@ -1,12 +1,12 @@
-# secrets.py
-# WLAN-Zugangsdaten. Diese Datei NICHT teilen oder committen.
-# Liegt auf dem Pico neben main.py im Wurzelverzeichnis.
+# secrets_example.py
+# Template for your Wi-Fi credentials.
+# On the Pico: rename this file to secrets.py and enter your own values.
+# Never upload your real secrets.py to GitHub.
 
-WIFI_SSID = "DEIN_WLAN"
-WIFI_PASSWORD = "DEIN_PASSWORT"
+WIFI_SSID = "YourNetwork"
+WIFI_PASSWORD = "YourPassword"
+WIFI_HOSTNAME = "PicoEnviro"
 
-# Regulatorische Funk-Domain fuer den CYW43-Chip. DE = Deutschland.
-# Ohne Laendercode nutzt der Chip vermutlich nur die Kanaele 1-11.
+# Regulatory radio domain for the CYW43 chip (optional).
+# If missing, config.WIFI_COUNTRY_DEFAULT applies.
 WIFI_COUNTRY = "DE"
-
-# EOF
