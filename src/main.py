@@ -22,11 +22,29 @@ import config
 import display
 
 
-def format_uptime(boot_time):
-    total = time.ticks_diff(time.ticks_ms(), boot_time) // 1000
-    h, rem = divmod(total, 3600)
-    m, s = divmod(rem, 60)
-    return "{:02d}:{:02d}:{:02d}".format(h, m, s)
+class Uptime:
+    """Laufzeit als Summe kurzer Schritte statt als Differenz zum Boot-
+    Zeitpunkt: ticks_diff() ist nur bis +-2^29 ms (~149 h) eindeutig, danach
+    wurde die Laufzeit negativ. Sekunden + Rest-ms getrennt, damit alles im
+    Small-Int-Bereich bleibt (keine Heap-Allokation pro Schleifenrunde)."""
+
+    def __init__(self):
+        self._last = time.ticks_ms()
+        self._s = 0
+        self._ms = 0
+
+    def tick(self):
+        now = time.ticks_ms()
+        self._ms += time.ticks_diff(now, self._last)
+        self._last = now
+        if self._ms >= 1000:
+            self._s += self._ms // 1000
+            self._ms %= 1000
+
+    def text(self):
+        h, rem = divmod(self._s, 3600)
+        m, s = divmod(rem, 60)
+        return "{:02d}:{:02d}:{:02d}".format(h, m, s)
 
 
 class EdgeButton:
@@ -69,7 +87,7 @@ class MinMaxTracker:
 
 
 def main():
-    boot_time = time.ticks_ms()
+    up = Uptime()
 
     # 1. Framebuffer zuerst anlegen (siehe Kopfkommentar).
     scr = display.Display()
@@ -187,7 +205,7 @@ def main():
             "iaq_score": iaq_score,
             "minmax": minmax.as_dict(),
             "trend": {k: trends[k].delta() for k in trend_keys},
-            "uptime": format_uptime(boot_time),
+            "uptime": up.text(),
             "wifi": {
                 "connected": net.connected,
                 "enabled": net.enabled,
@@ -266,6 +284,7 @@ def main():
                 print("Server-Start fehlgeschlagen:", error)
 
         now = time.ticks_ms()
+        up.tick()
 
         if scr.backlight_on and time.ticks_diff(now, last_activity) >= config.AUTO_OFF_IDLE_MS:
             scr.toggle_backlight()

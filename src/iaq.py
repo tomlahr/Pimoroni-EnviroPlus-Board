@@ -37,6 +37,7 @@ class IAQ:
         self.lo = None
         self.hi = None
         self._t_start = time.ticks_ms()
+        self._warm = False
         self._t_last = None
         self._load()
 
@@ -70,7 +71,16 @@ class IAQ:
 
     @property
     def warming_up(self):
-        return time.ticks_diff(time.ticks_ms(), self._t_start) < self.warmup_ms
+        # Einmal aufgewaermt, immer aufgewaermt: ticks_diff() ist nur bis
+        # +-2^29 ms (~149 h) eindeutig. Die Differenz zum Startzeitpunkt
+        # kippt danach ins Negative und wuerde die Sperrfrist sonst fuer
+        # die naechsten ~149 h erneut aktivieren.
+        if self._warm:
+            return False
+        if time.ticks_diff(time.ticks_ms(), self._t_start) >= self.warmup_ms:
+            self._warm = True
+            return False
+        return True
 
     def update(self, gas_kohm, valid):
         """Nach jeder Messung aufrufen. valid: Gaswert gueltig und Heizer
