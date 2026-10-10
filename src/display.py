@@ -35,9 +35,18 @@
 #
 # Bitmap-Fonts kennen "°" und "äöüÄÖÜß" (Pimoroni-Mapping in
 # unicode_sorta.hpp). "·", "µ", "±" erscheinen dagegen als Leerzeichen.
+#
+# Drehen: PicoGraphics kennt keine Drehung zur Laufzeit, "rotate" gibt es
+# nur im Konstruktor. Zum Drehen wird das Objekt neu angelegt - mit dem
+# eigenen Framebuffer (buffer=), damit kein zweiter 28,8-kB-Block noetig ist
+# (im REPL bestaetigt: freier Heap ueber 8 Neuanlagen unveraendert).
+# Den Destruktor (__del__) NIE selbst aufrufen: er gibt den DMA-Kanal frei.
+# Riefe ihn der GC spaeter ein zweites Mal auf, koennte er den Kanal des
+# neuen Objekts freigeben. Altes Objekt nur loslassen, gc.collect(), neu anlegen.
 
 from picographics import PicoGraphics, DISPLAY_ENVIRO_PLUS, PEN_P4
 from pimoroni import RGBLED
+import gc
 import time
 import math
 
@@ -45,6 +54,8 @@ import config
 
 PAGE_MAIN, PAGE_MINMAX, PAGE_WLAN, PAGE_SYSTEM = range(4)
 PAGE_COUNT = 4
+
+_FB_SIZE = 240 * 240 // 2   # PEN_P4: 4 Bit pro Pixel
 
 _IAQ_LED_RGB = {
     "green": (0, 255, 0),
@@ -100,19 +111,48 @@ def wifi_status_text(wifi):
         return "OFFLINE"
     return wifi.get("note") or "LINK?"
 
+def _load_rotation():
+    try:
+        with open(config.ROTATION_FILE) as f:
+            rot = int(f.read().strip())
+        if rot in config.ROTATIONS:
+            return rot
+    except Exception:
+        pass
+    return config.ROTATIONS[0]
+
+
+def _save_rotation(rot):
+    try:
+        with open(config.ROTATION_FILE, "w") as f:
+            f.write(str(rot))
+    except Exception:
+        pass
+
+
 class Display:
     def __init__(self):
-        self.gfx = PicoGraphics(display=DISPLAY_ENVIRO_PLUS, rotate=0,
-                                pen_type=PEN_P4)
+        # Framebuffer selbst anlegen und bei jeder Drehung wiederverwenden.
+        self._fb = bytearray(_FB_SIZE)
+        self.backlight_on = True
+        self.rotation = _load_rotation()
+        self.gfx = None
+        self._create_gfx()
         self.led = RGBLED(config.LED_R, config.LED_G, config.LED_B,
                            invert=config.LED_INVERT)
+        self.page = PAGE_MAIN
+
+    def _create_gfx(self):
+        """(Neu-)Anlage des Grafikobjekts in der aktuellen Lage. Palette,
+        Schrift und Helligkeit haengen am Objekt und werden neu gesetzt."""
+        self.gfx = None
+        gc.collect()
+        self.gfx = PicoGraphics(display=DISPLAY_ENVIRO_PLUS, rotate=self.rotation,
+                                pen_type=PEN_P4, buffer=self._fb)
         self.width, self.height = self.gfx.get_bounds()
         self.gfx.set_font("bitmap8")
         self._make_pens()
-
-        self.backlight_on = True
-        self.gfx.set_backlight(config.BRIGHTNESS)
-        self.page = PAGE_MAIN
+        self.gfx.set_backlight(config.BRIGHTNESS if self.backlight_on else 0)
 
     def _make_pens(self):
         g = self.gfx
@@ -137,6 +177,16 @@ class Display:
     def toggle_backlight(self):
         self.backlight_on = not self.backlight_on
         self.gfx.set_backlight(config.BRIGHTNESS if self.backlight_on else 0)
+
+    def rotate_next(self):
+        """Naechste Lage aus config.ROTATIONS. Schaltet das Display ein -
+        bei dunklem Display waere die Drehung sonst nicht zu sehen."""
+        rots = config.ROTATIONS
+        i = rots.index(self.rotation) if self.rotation in rots else -1
+        self.rotation = rots[(i + 1) % len(rots)]
+        _save_rotation(self.rotation)
+        self.backlight_on = True
+        self._create_gfx()
 
     def next_page(self):
         self.page = (self.page + 1) % PAGE_COUNT

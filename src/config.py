@@ -39,13 +39,22 @@ SLEEP_LED_PERIOD_MS = 4000         # eine volle Ein-/Ausatmung
 LED_NIGHT_LUX_THRESHOLD = 50
 
 # ── Buttons ───────────────────────────────────────────────
-BTN_A = 12   # Backlight an/aus
+BTN_A = 12   # Einfachklick: Backlight an/aus, Doppelklick: Display drehen
 BTN_B = 13   # WLAN/Webserver an/aus (mit LINK-Check)
 BTN_X = 14   # naechste Seite
 BTN_Y = 15   # vorige Seite
 
 # ── Display ───────────────────────────────────────────────
 BRIGHTNESS = 0.8         # Backlight-Helligkeit 0.0..1.0
+
+# Doppelklick auf Taste A dreht die Anzeige um 90 Grad weiter. Ein
+# Einfachklick wird erst nach DOUBLE_CLICK_MS ausgefuehrt - erst dann steht
+# fest, dass kein zweiter Klick kommt.
+DOUBLE_CLICK_MS = 350
+# Drehfolge. Dreht 90 auf deinem Board gegen den Uhrzeigersinn, hier
+# (0, 270, 180, 90) eintragen.
+ROTATIONS = (0, 90, 180, 270)
+ROTATION_FILE = "rotation.txt"   # letzte Lage, uebersteht einen Neustart
 
 # ── Kalibrierung Klima ────────────────────────────────────
 # TEMP_OFFSET wird vom Rohwert ABGEZOGEN (Sensor liest durch Eigenwaerme zu hoch).

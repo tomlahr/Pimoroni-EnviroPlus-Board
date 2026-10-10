@@ -68,6 +68,32 @@ class EdgeButton:
         return False
 
 
+class ClickCounter:
+    """Unterscheidet Einfach- und Doppelklick. Den Einfachklick meldet
+    update() erst nach Ablauf von window_ms - vorher ist offen, ob noch ein
+    zweiter Klick kommt."""
+
+    def __init__(self, window_ms):
+        self.window_ms = window_ms
+        self._pending = False
+        self._t_first = 0
+
+    def update(self, pressed):
+        """Jede Schleifenrunde aufrufen. Rueckgabe: 0, 1 oder 2 Klicks."""
+        now = time.ticks_ms()
+        if pressed:
+            if self._pending:
+                self._pending = False
+                return 2
+            self._pending = True
+            self._t_first = now
+            return 0
+        if self._pending and time.ticks_diff(now, self._t_first) >= self.window_ms:
+            self._pending = False
+            return 1
+        return 0
+
+
 class MinMaxTracker:
     """Session-basiert - startet bei jedem Boot neu, wie im Display gezeigt."""
 
@@ -115,7 +141,8 @@ def main():
     net = wifi.WiFi()
     server = web.WebServer(config.WEB_PORT)
 
-    btn_a = EdgeButton(config.BTN_A)  # Backlight an/aus
+    btn_a = EdgeButton(config.BTN_A)  # Einfachklick Backlight, Doppelklick drehen
+    a_clicks = ClickCounter(config.DOUBLE_CLICK_MS)
     btn_b = EdgeButton(config.BTN_B)  # WLAN an/aus
     btn_x = EdgeButton(config.BTN_X)  # naechste Seite
     btn_y = EdgeButton(config.BTN_Y)  # vorige Seite
@@ -246,13 +273,15 @@ def main():
         if wdt:
             wdt.feed()
 
-        a_pressed = btn_a.pressed()
+        a_click = a_clicks.update(btn_a.pressed())
         b_pressed = btn_b.pressed()
         x_pressed = btn_x.pressed()
         y_pressed = btn_y.pressed()
 
-        if a_pressed:
+        if a_click == 1:
             scr.toggle_backlight()
+        elif a_click == 2:
+            scr.rotate_next()
         if b_pressed:
             net.toggle()
             if not net.enabled:
@@ -262,7 +291,7 @@ def main():
         if y_pressed:
             scr.prev_page()
 
-        if a_pressed or b_pressed or x_pressed or y_pressed:
+        if a_click or b_pressed or x_pressed or y_pressed:
             last_activity = time.ticks_ms()
             # Sofort neu zeichnen statt bis zu 500 ms warten. Bewusst ein Flag
             # statt last_display = 0: ticks_ms() laeuft ueber, nach ~6 Tagen
