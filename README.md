@@ -79,7 +79,7 @@ To start Wi-Fi automatically at boot, uncomment `WIFI_AUTOSTART = True` in `conf
 
 | Button | Action |
 |---|---|
-| A | backlight on/off |
+| A | single click: backlight on/off · double click: rotate display 90° (saved across reboots) |
 | B | Wi-Fi and web server on/off |
 | X | next page |
 | Y | previous page |
