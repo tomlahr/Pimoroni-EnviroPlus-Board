@@ -20,6 +20,20 @@
 # Main-Screen zeigt nur Uptime + Kurzstatus; Details leben auf den drei
 # Unterseiten - das war noetig, um die Sound-Zeile ohne Ueberlauf unterzubringen.
 #
+# Zwei Betriebsarten (2026-11-10):
+#   Datenansicht - die vier Seiten, Backlight BRIGHTNESS, LED zeigt die
+#                  Luftqualitaet (gruen/gelb/rot, sehr schwach).
+#   Augen        - Bildschirmschoner aus eyes.py, LED aus. Backlight stufenlos
+#                  nach Umgebungslicht (EYES_BRIGHTNESS_CURVE), geglaettet.
+# Ein "Display aus" gibt es nicht mehr; Taste A wechselt zwischen beiden.
+#
+# Helligkeit: set_backlight() ist gamma-korrigiert (2,8) - der Wert ist NICHT
+# der Stromanteil. 0,8 -> 54 %, 0,6 -> 24 %, 0,4 -> 7,7 % Tastverhaeltnis.
+#
+# LED: Pimoronis RGBLED.set_rgb() rechnet mit 8 Bit. Bei sehr kleinen Werten
+# rundet der Gruenanteil von Gelb auf null (Gelb wird rot). Deshalb hier
+# direkt ueber die 16-Bit-PWM der drei Kanaele (led.led_r/_g/_b).
+#
 # Schriftgroessen: "bitmap8" skaliert nur in ganzen Schritten (1, 2, 3 ...) -
 # Bruchteile darunter rundeten bisher unbemerkt auf 1 ab. Feste Hierarchie
 # jetzt: scale=2 fuer Werte/Titel, scale=1 fuer Labels/Beschreibungen/Fusszeile.
@@ -47,21 +61,21 @@
 from picographics import PicoGraphics, DISPLAY_ENVIRO_PLUS, PEN_P4
 from pimoroni import RGBLED
 import gc
-import time
-import math
 
 import config
+import eyes
 
 PAGE_MAIN, PAGE_MINMAX, PAGE_WLAN, PAGE_SYSTEM = range(4)
 PAGE_COUNT = 4
 
 _FB_SIZE = 240 * 240 // 2   # PEN_P4: 4 Bit pro Pixel
 
-_IAQ_LED_RGB = {
-    "green": (0, 255, 0),
-    "yellow": (255, 180, 0),
-    "red": (255, 0, 0),
-    "grey": (80, 80, 80),
+# LED-Mischung je Ampelfarbe (Anteile von LED_IAQ_DUTY). "grey" fehlt
+# bewusst: in der Aufwaermphase gibt es keine Bewertung -> LED aus.
+_IAQ_LED_MIX = {
+    "green": (0.0, 1.0, 0.0),
+    "yellow": (1.0, config.LED_YELLOW_GREEN, 0.0),
+    "red": (1.0, 0.0, 0.0),
 }
 
 HEADER_BAND_H = 36  # gruene Flaeche im Header
@@ -134,12 +148,17 @@ class Display:
     def __init__(self):
         # Framebuffer selbst anlegen und bei jeder Drehung wiederverwenden.
         self._fb = bytearray(_FB_SIZE)
-        self.backlight_on = True
+        self.eyes_mode = False
+        self._eyes = eyes.Eyes()
+        self._eyes_b = config.EYES_BRIGHTNESS_CURVE[0][1]   # aktuelle Augen-Helligkeit
+        self._skip_lux = False
         self.rotation = _load_rotation()
         self.gfx = None
         self._create_gfx()
         self.led = RGBLED(config.LED_R, config.LED_G, config.LED_B,
                            invert=config.LED_INVERT)
+        self._led_duty(0, 0, 0)       # nach dem Einschalten sicher aus
+        self._led_key = None
         self.page = PAGE_MAIN
 
     def _create_gfx(self):
@@ -152,7 +171,7 @@ class Display:
         self.width, self.height = self.gfx.get_bounds()
         self.gfx.set_font("bitmap8")
         self._make_pens()
-        self.gfx.set_backlight(config.BRIGHTNESS if self.backlight_on else 0)
+        self.gfx.set_backlight(self._brightness())
 
     def _make_pens(self):
         g = self.gfx
@@ -174,18 +193,34 @@ class Display:
         # Belegt: 10 von 16 Palettenplaetzen.
 
     # ── Steuerung ─────────────────────────────────────────
-    def toggle_backlight(self):
-        self.backlight_on = not self.backlight_on
-        self.gfx.set_backlight(config.BRIGHTNESS if self.backlight_on else 0)
+    def _brightness(self):
+        return self._eyes_b if self.eyes_mode else config.BRIGHTNESS
+
+    def enter_eyes(self):
+        # Mit der niedrigsten Stufe starten und die erste Messung verwerfen:
+        # sie kann noch das helle Datenbild enthalten (Eigenlicht).
+        self.eyes_mode = True
+        self._eyes_b = config.EYES_BRIGHTNESS_CURVE[0][1]
+        self._skip_lux = True
+        self._eyes.reset()
+        self.gfx.set_backlight(self._brightness())
+
+    def leave_eyes(self):
+        self.eyes_mode = False
+        self.gfx.set_backlight(self._brightness())
+
+    def toggle_eyes(self):
+        if self.eyes_mode:
+            self.leave_eyes()
+        else:
+            self.enter_eyes()
 
     def rotate_next(self):
-        """Naechste Lage aus config.ROTATIONS. Schaltet das Display ein -
-        bei dunklem Display waere die Drehung sonst nicht zu sehen."""
+        """Naechste Lage aus config.ROTATIONS. Die Betriebsart bleibt."""
         rots = config.ROTATIONS
         i = rots.index(self.rotation) if self.rotation in rots else -1
         self.rotation = rots[(i + 1) % len(rots)]
         _save_rotation(self.rotation)
-        self.backlight_on = True
         self._create_gfx()
 
     def next_page(self):
@@ -194,27 +229,25 @@ class Display:
     def prev_page(self):
         self.page = (self.page - 1) % PAGE_COUNT
 
-    def set_iaq_led(self, color_key, lux=None):
-        if not self.backlight_on:
-            if lux is not None and lux >= config.LED_NIGHT_LUX_THRESHOLD:
-                # Hell genug (Tageslicht/Raumbeleuchtung) - kein Pulsieren noetig,
-                # komplett aus statt einer Anzeige, die im Hellen ohnehin
-                # unauffaellig waere.
-                self.led.set_rgb(0, 0, 0)
-                return
-            # "Lebt noch"-Signal statt komplett dunkel - sanftes rosa Pulsieren,
-            # bewusst keine der vier IAQ-Farben (Verwechslungsgefahr mit
-            # "kalibriert gerade"). Weicher Ein-/Ausklang per Kosinus statt
-            # linearem Auf/Ab, damit es nicht wie ein Blinken wirkt.
-            phase = (time.ticks_ms() % config.SLEEP_LED_PERIOD_MS) / config.SLEEP_LED_PERIOD_MS
-            brightness = (1 - math.cos(2 * math.pi * phase)) / 2  # 0..1
-            pr, pg, pb = config.SLEEP_LED_COLOR
-            scale = brightness * (config.SLEEP_LED_PEAK / 255.0)
-            self.led.set_rgb(int(pr * scale), int(pg * scale), int(pb * scale))
+    def _led_duty(self, r, g, b):
+        """Kanalanteile 0..1 direkt als 16-Bit-PWM (siehe Kopfkommentar)."""
+        for pwm, v in ((self.led.led_r, r), (self.led.led_g, g), (self.led.led_b, b)):
+            d = int(v * 65535)
+            pwm.duty_u16(65535 - d if config.LED_INVERT else d)
+
+    def set_iaq_led(self, color_key):
+        """Datenansicht: Ampelfarbe mit LED_IAQ_DUTY. Augen und Aufwaerm-
+        phase: aus. Schreibt die PWM nur bei einer Aenderung."""
+        key = None if self.eyes_mode else color_key
+        if key == self._led_key:
             return
-        r, g, b = _IAQ_LED_RGB.get(color_key, _IAQ_LED_RGB["grey"])
-        scale = config.LED_IAQ_BRIGHTNESS / 255.0
-        self.led.set_rgb(int(r * scale), int(g * scale), int(b * scale))
+        self._led_key = key
+        mix = _IAQ_LED_MIX.get(key)
+        if mix is None:
+            self._led_duty(0, 0, 0)
+            return
+        d = config.LED_IAQ_DUTY
+        self._led_duty(mix[0] * d, mix[1] * d, mix[2] * d)
 
     def splash(self, text):
         g = self.gfx
@@ -225,8 +258,36 @@ class Display:
         g.update()
 
     # ── Zeichnen ──────────────────────────────────────────
+    def eyes_light(self, lux):
+        """Pro Lichtmessung im Augen-Modus aufrufen (main.py). Zieht die
+        Helligkeit ein Stueck Richtung Kurvenwert."""
+        if lux is None:
+            return
+        if self._skip_lux:
+            self._skip_lux = False
+            return
+        pts = config.EYES_BRIGHTNESS_CURVE
+        target = pts[-1][1]
+        if lux <= pts[0][0]:
+            target = pts[0][1]
+        else:
+            for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+                if lux <= x1:
+                    target = y0 + (y1 - y0) * (lux - x0) / (x1 - x0)
+                    break
+        b = self._eyes_b + (target - self._eyes_b) * config.EYES_SMOOTH
+        if abs(b - self._eyes_b) >= 0.005:
+            self._eyes_b = b
+            self.gfx.set_backlight(b)
+
+    def draw_eyes(self, color_key):
+        """Ein Bild Augen-Animation."""
+        pen = self.CYAN if color_key == "grey" else self._iaq_pen.get(color_key, self.CYAN)
+        self._eyes.draw(self.gfx, self.BLACK, self.WHITE, pen, color_key)
+        self.gfx.update()
+
     def draw(self, data):
-        if not self.backlight_on:
+        if self.eyes_mode:
             return
         g = self.gfx
         g.set_pen(self.BLACK)
@@ -354,6 +415,7 @@ class Display:
             ("IP-Adresse", wifi.get("ip") or "--", self.WHITE),
             ("Signal", rssi_text, self.WHITE),
             ("Hostname", wifi.get("hostname") or "--", self.WHITE),
+            ("Zeitplan", wifi.get("schedule") or "--", self.WHITE),
         ]
         self._kv_page("WLAN", rows)
         g = self.gfx
@@ -397,4 +459,4 @@ class Display:
         ]
         self._kv_page("System", rows)
 
-# EOF 2026-09-25
+# EOF 2026-11-11

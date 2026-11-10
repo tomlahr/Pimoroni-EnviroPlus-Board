@@ -30,22 +30,33 @@ LED_G = 7
 LED_B = 10               # per REPL-Test bestaetigt (nicht GP8 - die PDF-Text-
                           # extraktion des Schaltplans hatte hier geirrt)
 LED_INVERT = True        # gemeinsame Anode -> invertiert ansteuern
-LED_IAQ_BRIGHTNESS = 40  # 0..255, bewusst gedimmt fuer den IAQ-Status
-SLEEP_LED_COLOR = (255, 182, 193)  # sanftrosa (light pink)
-SLEEP_LED_PEAK = 15                # 0..255 - deutlich unter LED_IAQ_BRIGHTNESS
-SLEEP_LED_PERIOD_MS = 4000         # eine volle Ein-/Ausatmung
-# Ab hier gilt's als "hell genug" - LED komplett aus statt Pulsieren.
-# Bewusst dieselbe Grenze wie describe_light()'s "dunkel"-Kategorie (<50 Lux).
-LED_NIGHT_LUX_THRESHOLD = 50
+# Ampelfarbe nur in der Datenansicht, im Bildschirmschoner und in der
+# Aufwaermphase aus. Helligkeit als Tastverhaeltnis 0..1 (16-Bit-PWM);
+# 0.002 = 0,2 %, per REPL-Test bei Tag und im Dunkeln gut erkennbar.
+LED_IAQ_DUTY = 0.002
+LED_YELLOW_GREEN = 0.7   # Gruenanteil fuer Gelb (Rot = 1.0)
 
 # ── Buttons ───────────────────────────────────────────────
-BTN_A = 12   # Einfachklick: Backlight an/aus, Doppelklick: Display drehen
-BTN_B = 13   # WLAN/Webserver an/aus (mit LINK-Check)
+BTN_A = 12   # Einfachklick: Daten <-> Augen, Doppelklick: Display drehen
+BTN_B = 13   # WLAN/Webserver an/aus; setzt den WLAN-Zeitplan bis zum
+             # naechsten Schaltpunkt aus
 BTN_X = 14   # naechste Seite
 BTN_Y = 15   # vorige Seite
 
 # ── Display ───────────────────────────────────────────────
-BRIGHTNESS = 0.8         # Backlight-Helligkeit 0.0..1.0
+BRIGHTNESS = 0.8         # Backlight Datenansicht 0.0..1.0 (gamma-korrigiert)
+
+# Bildschirmschoner "Augen" (eyes.py). Helligkeit stufenlos nach Umgebungs-
+# licht: Punkte (Lux, Helligkeit), dazwischen linear, ausserhalb konstant.
+# Lux-Messung 2026-11-11 am Schreibtisch (Display aus): tagsueber 8,5-9,7,
+# am Fenster 40-218, nachts ~0-4. Am Geraet abgestimmt (Variante 1):
+# mindestens 0.6 (24 %). Keine eigene Nachtstufe: am Schreibtisch misst der
+# Sensor abends mit Lampe ebenfalls ~0 Lux, eine Nachtstufe griff dann schon
+# am Abend. Eigenlicht der Augen kommt am Sensor praktisch nicht an (0 Lux
+# bei leuchtenden Augen gemessen).
+EYES_BRIGHTNESS_CURVE = ((9, 0.60), (60, 0.70), (250, 0.90))
+EYES_SMOOTH = 0.35            # Anteil pro Messung (alle 3 s), ~90 % nach 15 s
+EYES_FRAME_MS = 80            # 12,5 Bilder/s; ein Vollbild-Update dauert ~45 ms
 
 # Doppelklick auf Taste A dreht die Anzeige um 90 Grad weiter. Ein
 # Einfachklick wird erst nach DOUBLE_CLICK_MS ausgefuehrt - erst dann steht
@@ -66,6 +77,9 @@ ROTATION_FILE = "rotation.txt"   # letzte Lage, uebersteht einen Neustart
 # Abgleich 23./24.09. gegen SwitchBot (Fensterbank) und Wandsensor:
 # +0.8/+1.0/+1.3 bzw. +1.2/+1.2/+0.8 C ueber altem OFF-Wert 4.35.
 # Bei laengerem Backlight-Betrieb (>~20 min) liest das Geraet zu hoch.
+# ACHTUNG (2026-11-10): Mit dem Augen-Bildschirmschoner laeuft das Backlight
+# dauerhaft (schwach) und die CPU zeichnet laufend. Wert nach einigen Tagen
+# gegen die Referenz neu abgleichen.
 TEMP_OFFSET = 5.4
 # Feuchte wird physikalisch ueber Magnus auf die korrigierte Temperatur zurueckgerechnet
 # (siehe sensors.py). HUMIDITY_TRIM ist nur die letzte empirische Feinjustage
@@ -99,7 +113,7 @@ HISTORY_INTERVAL_MS = 60000  # ein Verlaufspunkt pro Minute
 # ── Takt-Intervalle (nicht blockierend) ───────────────────
 SENSOR_INTERVAL_MS = 3000    # BME/LTR lesen (Paket 2: 3 s statt 1 s -> weniger Heizerwaerme)
 LOOP_SLEEP_MS = 10           # Bremse pro Schleifendurchlauf - fehlte bisher
-AUTO_OFF_IDLE_MS = 2 * 60 * 1000   # Display automatisch aus nach 2 Min. Inaktivitaet
+AUTO_OFF_IDLE_MS = 2 * 60 * 1000   # Augen-Bildschirmschoner nach 2 Min. ohne Tastendruck
 MIC_INTERVAL_MS = 500        # Pegel messen (laufend - Display UND Web zeigen ihn)
 DISPLAY_INTERVAL_MS = 500    # Bildschirm neu zeichnen
 INTERNAL_TEMP_INTERVAL_MS = 10000  # interne Pico-Temp, langsam wechselnd
@@ -121,7 +135,18 @@ WIFI_RESET_AFTER = 3       # nach so vielen Fehlversuchen Schnittstelle neu star
 WIFI_COUNTRY_DEFAULT = "DE"  # falls secrets.WIFI_COUNTRY fehlt
 # WLAN beim Start automatisch einschalten (wie beim BME690).
 # Auskommentiert = WLAN startet aus, Taste B schaltet ein.
-# WIFI_AUTOSTART = True
+WIFI_AUTOSTART = True
+# WLAN-Nachtabschaltung (wifi_schedule.py, identisch beim BME690). Die
+# FRITZ!Box schaltet ihr WLAN 00:10-05:55 ab; der Pico trennt sich vorher
+# und verbindet sich erst danach wieder. Ortszeit, Fenster ueber Mitternacht
+# ist erlaubt.
+WIFI_OFF_FROM = (0, 0)
+WIFI_OFF_UNTIL = (6, 0)
+# Der Reihe nach probiert. Die FRITZ!Box beantwortet keine NTP-Anfragen
+# (ETIMEDOUT, Zeitserver im Heimnetz nicht aktiv) - deshalb nur der Pool.
+NTP_HOSTS = ("pool.ntp.org",)
+NTP_RESYNC_MS = 6 * 3600 * 1000             # Zeitabgleich alle 6 h
+NTP_RETRY_MS = 60 * 1000                    # nach Fehlschlag in 1 min erneut
 WEB_REFRESH_S = 5            # Auto-Reload der Messwerte im Browser
 WEB_CHART_REFRESH_S = 60     # Auto-Reload der Diagramme
 
@@ -134,4 +159,4 @@ WEB_CHART_REFRESH_S = 60     # Auto-Reload der Diagramme
 # Erst scharf schalten (z.B. 8000), wenn das Geraet eigenstaendig laeuft.
 WDT_TIMEOUT_MS = 0
 
-# EOF 2026-09-26
+# EOF 2026-11-10

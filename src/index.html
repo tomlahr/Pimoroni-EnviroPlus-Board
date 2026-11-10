@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PicoEnviro+</title>
+<style>
+  :root {
+    --bg:#0d1526; --card:#141d33; --line:#1f2a44;
+    --text:#c7d0e0; --muted:#7c88a3; --dim:#6b7794;
+    --good:#4ec98a; --warn:#e0a13a; --bad:#e0546a; --accent:#5cc9e8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin:0 auto; padding:20px; max-width:640px; background:var(--bg); color:var(--text);
+    font-family: -apple-system, Helvetica, Arial, sans-serif;
+  }
+  h1 { text-align:center; font-size:20px; font-weight:500; color:var(--accent); margin:0 0 18px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .card { background:var(--card); border-radius:12px; padding:14px; text-align:center; }
+  .label { font-size:12px; letter-spacing:.08em; color:var(--muted); }
+  .value { font-size:28px; font-weight:500; margin:2px 0; }
+  .trend { font-size:12px; color:var(--accent); min-height:14px; }
+  .minmax { font-size:12px; color:var(--dim); }
+  .good { color: var(--good); }
+  .warn { color: var(--warn); }
+  .bad { color: var(--bad); }
+  .neutral { color: var(--accent); }
+  .iaqcard { margin-top:12px; }
+  .iaqlabel { font-size:24px; font-weight:500; margin:2px 0; }
+  .iaqsub { font-size:12px; color:var(--muted); min-height:14px; }
+  .iaqstatus { font-size:11px; color:var(--dim); margin-top:2px; }
+  .iaqbar { height:12px; border-radius:6px; margin:10px 0 4px;
+    background:linear-gradient(90deg,#c0398a,#d98a3a,#4ec98a); position:relative; }
+  .iaqmarker { position:absolute; top:-3px; width:6px; height:18px;
+    background:#fff; border-radius:3px; }
+  .iaqscale { display:flex; justify-content:space-between; font-size:10px; color:var(--dim); }
+  h2.section { font-size:15px; font-weight:500; color:#8fa0d6; margin:22px 0 10px; }
+  .chartcard { background:var(--card); border-radius:12px; padding:14px; }
+  .chartrow { display:flex; justify-content:space-between; font-size:13px; }
+  canvas { width:100%; height:70px; margin-top:6px; display:block; }
+  footer { border-top:1px solid var(--line); margin-top:18px; padding-top:12px;
+    text-align:center; font-size:11px; color:var(--dim); line-height:1.6; }
+</style>
+</head>
+<body>
+<h1>PicoEnviro+ &#x1F321;&#xFE0F; Wetterstation</h1>
+<div class="grid">
+  <div class="card"><div class="label">TEMPERATUR</div>
+    <div class="value" id="v-temp">--</div>
+    <div class="trend" id="t-temp"></div>
+    <div class="minmax" id="m-temp"></div></div>
+  <div class="card"><div class="label">LUFTFEUCHTE</div>
+    <div class="value" id="v-humidity">--</div>
+    <div class="trend" id="t-humidity"></div>
+    <div class="minmax" id="m-humidity"></div></div>
+  <div class="card"><div class="label">TAUPUNKT</div>
+    <div class="value neutral" id="v-dewpoint">--</div>
+    <div class="minmax" id="d-dewpoint"></div></div>
+  <div class="card"><div class="label">VPD</div>
+    <div class="value neutral" id="v-vpd">--</div>
+    <div class="minmax" id="d-vpd"></div></div>
+  <div class="card"><div class="label">LUFTDRUCK</div>
+    <div class="value neutral" id="v-pressure">--</div>
+    <div class="trend" id="t-pressure"></div>
+    <div class="minmax" id="m-pressure"></div></div>
+  <div class="card"><div class="label">GASWIDERSTAND</div>
+    <div class="value neutral" id="v-gas">--</div>
+    <div class="trend" id="t-gas"></div>
+    <div class="minmax" id="m-gas"></div></div>
+  <div class="card"><div class="label">LICHT</div>
+    <div class="value neutral" id="v-lux">--</div>
+    <div class="minmax" id="d-lux"></div>
+    <div class="minmax" id="m-lux"></div></div>
+  <div class="card"><div class="label">GERÄUSCHPEGEL</div>
+    <div class="value neutral" id="v-db">--</div>
+    <div class="minmax" id="d-db"></div>
+    <div class="minmax" id="m-db"></div></div>
+</div>
+
+<div class="card iaqcard">
+  <div class="label">LUFTQUALITÄT (RELATIV)</div>
+  <div class="iaqlabel" id="v-iaqlabel">--</div>
+  <div class="iaqbar"><div class="iaqmarker" id="iaqmarker" style="left:0%"></div></div>
+  <div class="iaqscale"><span>sehr schlecht</span><span>mäßig</span><span>gut</span></div>
+  <div class="iaqsub" id="v-iaqsub"></div>
+  <div class="iaqstatus" id="v-iaqstatus"></div>
+</div>
+
+<h2 class="section">Verlauf der letzten __HISTORY_HOURS__ Stunden</h2>
+<div class="grid">
+  <div class="chartcard">
+    <div class="chartrow"><span>Temperatur</span><span id="c-temp"></span></div>
+    <canvas id="chart-temp"></canvas>
+  </div>
+  <div class="chartcard">
+    <div class="chartrow"><span>Luftfeuchte</span><span id="c-humidity"></span></div>
+    <canvas id="chart-humidity"></canvas>
+  </div>
+  <div class="chartcard">
+    <div class="chartrow"><span>Luftdruck</span><span id="c-pressure"></span></div>
+    <canvas id="chart-pressure"></canvas>
+  </div>
+  <div class="chartcard">
+    <div class="chartrow"><span>Gaswiderstand</span><span id="c-gas"></span></div>
+    <canvas id="chart-gas"></canvas>
+  </div>
+</div>
+
+<footer id="footer">Lade...</footer>
+
+<script>
+const REFRESH_MS = __REFRESH_MS__;
+const CHART_REFRESH_MS = __CHART_REFRESH_MS__;
+const TEMP_IDEAL = [__TEMP_LO__, __TEMP_HI__];
+const HUM_IDEAL = [__HUM_LO__, __HUM_HI__];
+
+function fmt(v, digits) {
+  if (v === null || v === undefined) return "--";
+  return v.toFixed(digits);
+}
+
+function trendText(v, unit, digits) {
+  if (v === null || v === undefined) return "";
+  const sign = v >= 0 ? "+" : "";
+  return sign + v.toFixed(digits) + " " + unit + " / 10 min";
+}
+
+function kb(v) {
+  if (v === null || v === undefined) return "--";
+  return (v / 1024).toFixed(1);
+}
+
+function idealClass(v, lo, hi) {
+  if (v === null || v === undefined) return "";
+  return (v >= lo && v <= hi) ? "good" : "";
+}
+
+async function loadData() {
+  try {
+    const r = await fetch("/data");
+    const d = await r.json();
+
+    document.getElementById("v-temp").textContent = fmt(d.temp, 1) + " °C";
+    document.getElementById("v-temp").className = "value " + idealClass(d.temp, TEMP_IDEAL[0], TEMP_IDEAL[1]);
+    document.getElementById("t-temp").textContent = trendText(d.temp_trend, "°C", 1);
+    document.getElementById("m-temp").textContent = "min " + fmt(d.temp_min,1) + " / max " + fmt(d.temp_max,1);
+
+    document.getElementById("v-humidity").textContent = fmt(d.humidity, 0) + " %";
+    document.getElementById("v-humidity").className = "value " + idealClass(d.humidity, HUM_IDEAL[0], HUM_IDEAL[1]);
+    document.getElementById("t-humidity").textContent = trendText(d.humidity_trend, "%", 0);
+    document.getElementById("m-humidity").textContent = "min " + fmt(d.humidity_min,0) + " / max " + fmt(d.humidity_max,0);
+
+    document.getElementById("v-pressure").textContent = fmt(d.pressure, 0) + " hPa";
+    document.getElementById("t-pressure").textContent = d.pressure_desc || "";
+    document.getElementById("m-pressure").textContent = "min " + fmt(d.pressure_min,0) + " / max " + fmt(d.pressure_max,0);
+
+    document.getElementById("v-gas").textContent = fmt(d.gas_kohm, 0) + " kOhm";
+    document.getElementById("t-gas").textContent = trendText(d.gas_trend, "kOhm", 0);
+    document.getElementById("m-gas").textContent = "min " + fmt(d.gas_min,0) + " / max " + fmt(d.gas_max,0);
+
+    document.getElementById("v-lux").textContent = fmt(d.lux, 0) + " Lux";
+    document.getElementById("d-lux").textContent = d.light_desc || "";
+    document.getElementById("m-lux").textContent = "min " + fmt(d.lux_min,0) + " / max " + fmt(d.lux_max,0);
+
+    document.getElementById("v-db").textContent = fmt(d.db, 0) + " dB";
+    document.getElementById("d-db").textContent = d.sound_desc || "";
+    document.getElementById("m-db").textContent = "min " + fmt(d.db_min,0) + " / max " + fmt(d.db_max,0);
+
+    document.getElementById("v-dewpoint").textContent = fmt(d.dewpoint, 1) + " °C";
+    document.getElementById("d-dewpoint").textContent = "min " + fmt(d.dewpoint_min,1) + " / max " + fmt(d.dewpoint_max,1);
+
+    document.getElementById("v-vpd").textContent = fmt(d.vpd_kpa, 2) + " kPa";
+    document.getElementById("d-vpd").textContent = "min " + fmt(d.vpd_min,2) + " / max " + fmt(d.vpd_max,2);
+
+    const iaqColors = {green:"good", yellow:"warn", red:"bad", grey:""};
+    const lab = document.getElementById("v-iaqlabel");
+    lab.textContent = d.iaq_label || "--";
+    lab.className = "iaqlabel " + (iaqColors[d.iaq_color] || "");
+    const marker = document.getElementById("iaqmarker");
+    if (d.iaq_score === null || d.iaq_score === undefined) {
+      marker.style.left = "0%";
+      document.getElementById("v-iaqsub").textContent = "Heizer wärmt auf, Bewertung ab ca. 20 min";
+    } else {
+      marker.style.left = Math.round(d.iaq_score * 100) + "%";
+      document.getElementById("v-iaqsub").textContent = "";
+    }
+
+    const statusParts = [];
+    if (d.gas_valid === true) statusParts.push("Gaswert gültig");
+    else if (d.gas_valid === false) statusParts.push("Gaswert ungültig");
+    if (d.heater_stable === true) statusParts.push("Heizer stabil");
+    else if (d.heater_stable === false) statusParts.push("Heizer instabil");
+    document.getElementById("v-iaqstatus").textContent = statusParts.join(", ");
+
+    const status = d.online ? "ONLINE" : "LINK?";
+    document.getElementById("footer").textContent =
+      "Messwerte alle " + (REFRESH_MS/1000) + " s aktualisiert | Diagramme jede Minute" +
+      " | IP: " + (d.ip || "--") + " | " + status +
+      " | Laufzeit " + (d.uptime || "--") +
+      " | Pico: ~" + fmt(d.internal_temp, 0) + " °C" +
+      " | RAM frei " + kb(d.mem_free) + " (min " + kb(d.mem_free_min) + ") kB" +
+      " | Block " + kb(d.heap_block) + " (min " + kb(d.heap_block_min) + ") kB";
+  } catch (e) { /* naechster Versuch beim naechsten Intervall */ }
+}
+
+function drawSpark(canvas, values, color, minSpan) {
+  const ctx = canvas.getContext("2d");
+  const w = canvas.clientWidth || 260;
+  const h = 70;
+  canvas.width = w; canvas.height = h;
+  ctx.clearRect(0, 0, w, h);
+  if (!values || values.length < 2) return;
+  let lo = Math.min.apply(null, values);
+  let hi = Math.max.apply(null, values);
+  // Mindesthoehe der Skala: sonst blaest die Autoskalierung Sprünge von
+  // 0,1 °C oder 1 hPa auf die volle Höhe auf (Rechteck-Kurven).
+  if (minSpan && hi - lo < minSpan) {
+    const mid = (hi + lo) / 2;
+    lo = mid - minSpan / 2; hi = mid + minSpan / 2;
+  }
+  const span = (hi - lo) || 1;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  values.forEach(function(v, i) {
+    const x = (i / (values.length - 1)) * (w - 8) + 4;
+    const y = h - 6 - ((v - lo) / span) * (h - 12);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
+async function loadHistory() {
+  try {
+    const r = await fetch("/history");
+    const h = await r.json();
+    drawSpark(document.getElementById("chart-temp"), h.temp, "#d98a3a", 1.0);
+    drawSpark(document.getElementById("chart-humidity"), h.humidity, "#5cc9e8", 4);
+    drawSpark(document.getElementById("chart-pressure"), h.pressure, "#5cc9e8", 2);
+    drawSpark(document.getElementById("chart-gas"), h.gas_kohm, "#4ec98a", 20);
+    function last(arr) { return (arr && arr.length) ? arr[arr.length-1] : null; }
+    document.getElementById("c-temp").textContent = fmt(last(h.temp),1) + " °C";
+    document.getElementById("c-humidity").textContent = fmt(last(h.humidity),0) + " %";
+    document.getElementById("c-pressure").textContent = fmt(last(h.pressure),0) + " hPa";
+    document.getElementById("c-gas").textContent = fmt(last(h.gas_kohm),0) + " kOhm";
+  } catch (e) { /* naechster Versuch beim naechsten Intervall */ }
+}
+
+loadData();
+loadHistory();
+setInterval(loadData, REFRESH_MS);
+setInterval(loadHistory, CHART_REFRESH_MS);
+</script>
+</body>
+</html>

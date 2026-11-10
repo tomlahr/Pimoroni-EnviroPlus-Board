@@ -6,8 +6,8 @@
 # Speicher-Reihenfolge (Paket 1, 2026-09-23):
 #   1. Display zuerst -> der 28,8-kB-Framebuffer bekommt einen sauberen,
 #      zusammenhaengenden Platz auf dem noch unzerstueckelten Heap.
-#   2. web erst DANACH importieren -> dessen HTML-Aufbau (inkl. Zwischen-
-#      kopien) zerstueckelt den Heap nicht mehr vor dem Framebuffer.
+#   2. Restliche Module erst DANACH importieren. (web.py baut seit
+#      2026-11-11 kein HTML mehr beim Import, die Seite kommt aus index.html.)
 #
 # Zustand bei Bedarf: build_state() setzt das grosse Zustands-dict nur noch
 # zusammen, wenn das Display neu zeichnet oder eine /data-Anfrage kommt -
@@ -125,6 +125,7 @@ def main():
     import iaq as iaq_mod
     import system
     import wifi
+    import wifi_schedule
     import history
     import web
     gc.collect()
@@ -139,11 +140,14 @@ def main():
     selftest = sensors.SelfTest()
     sysstats = system.SystemStats()
     net = wifi.WiFi()
+    sched = wifi_schedule.WifiSchedule(config.WIFI_OFF_FROM, config.WIFI_OFF_UNTIL,
+                                       config.NTP_HOSTS, config.NTP_RESYNC_MS,
+                                       config.NTP_RETRY_MS)
     server = web.WebServer(config.WEB_PORT)
 
-    btn_a = EdgeButton(config.BTN_A)  # Einfachklick Backlight, Doppelklick drehen
+    btn_a = EdgeButton(config.BTN_A)  # Einfachklick Daten <-> Augen, Doppelklick drehen
     a_clicks = ClickCounter(config.DOUBLE_CLICK_MS)
-    btn_b = EdgeButton(config.BTN_B)  # WLAN an/aus
+    btn_b = EdgeButton(config.BTN_B)  # WLAN an/aus (Eingriff in den Zeitplan)
     btn_x = EdgeButton(config.BTN_X)  # naechste Seite
     btn_y = EdgeButton(config.BTN_Y)  # vorige Seite
 
@@ -241,6 +245,7 @@ def main():
                 "ssid": net.ssid,
                 "rssi": system.wlan_rssi(net.wlan),
                 "hostname": secrets.WIFI_HOSTNAME,
+                "schedule": sched.status_text(),
             },
             "system": {
                 "internal_temp": internal_temp,
@@ -259,7 +264,7 @@ def main():
         if config.WDT_TIMEOUT_MS else None
 
     now0 = time.ticks_ms()
-    last_sensor = last_mic = last_internal = last_display = 0
+    last_sensor = last_mic = last_internal = last_display = last_eyes = 0
     last_system = last_probe = last_iaq_save = now0
     last_activity = now0
     force_draw = False
@@ -279,17 +284,26 @@ def main():
         y_pressed = btn_y.pressed()
 
         if a_click == 1:
-            scr.toggle_backlight()
+            scr.toggle_eyes()
         elif a_click == 2:
             scr.rotate_next()
         if b_pressed:
+            # Wirkt auch aus den Augen heraus sofort und zeigt danach die
+            # WLAN-Seite - nachts der Eingriff in den Zeitplan.
             net.toggle()
+            sched.manual()
             if not net.enabled:
                 server.stop()
-        if x_pressed:
-            scr.next_page()
-        if y_pressed:
-            scr.prev_page()
+            if scr.eyes_mode:
+                scr.leave_eyes()
+            scr.page = display.PAGE_WLAN
+        if x_pressed or y_pressed:
+            if scr.eyes_mode:
+                scr.leave_eyes()          # erster Druck weckt nur
+            elif x_pressed:
+                scr.next_page()
+            else:
+                scr.prev_page()
 
         if a_click or b_pressed or x_pressed or y_pressed:
             last_activity = time.ticks_ms()
@@ -312,15 +326,24 @@ def main():
             except Exception as error:
                 print("Server-Start fehlgeschlagen:", error)
 
+        action = sched.update(net.enabled, net.connected)
+        if action == "off":
+            net.disable()
+            server.stop()
+        elif action == "on":
+            net.enable()
+
         now = time.ticks_ms()
         up.tick()
 
-        if scr.backlight_on and time.ticks_diff(now, last_activity) >= config.AUTO_OFF_IDLE_MS:
-            scr.toggle_backlight()
+        if not scr.eyes_mode and time.ticks_diff(now, last_activity) >= config.AUTO_OFF_IDLE_MS:
+            scr.enter_eyes()
 
         if time.ticks_diff(now, last_sensor) >= config.SENSOR_INTERVAL_MS:
             last_sensor = now
             sample_sensors(now)
+            if scr.eyes_mode:
+                scr.eyes_light(lux)
 
         if time.ticks_diff(now, last_mic) >= config.MIC_INTERVAL_MS:
             last_mic = now
@@ -344,16 +367,20 @@ def main():
             last_iaq_save = now
             iaq.save()
 
-        # LED jede Runde - das rosa "Atmen" braucht eine hohe Bildrate.
-        scr.set_iaq_led(iaq_color, lux)
+        # LED-Zustand jede Runde pruefen; geschrieben wird nur bei Aenderung.
+        scr.set_iaq_led(iaq_color)
 
         try:
             server.poll(build_state, hist_buf)
         except Exception:
             pass
 
-        if scr.backlight_on and (force_draw or
-                time.ticks_diff(now, last_display) >= config.DISPLAY_INTERVAL_MS):
+        if scr.eyes_mode:
+            if time.ticks_diff(now, last_eyes) >= config.EYES_FRAME_MS:
+                last_eyes = now
+                force_draw = False
+                scr.draw_eyes(iaq_color)
+        elif force_draw or time.ticks_diff(now, last_display) >= config.DISPLAY_INTERVAL_MS:
             last_display = now
             force_draw = False
             scr.draw(build_state())
@@ -363,4 +390,4 @@ def main():
 
 main()
 
-# EOF 2026-09-26
+# EOF 2026-11-11
