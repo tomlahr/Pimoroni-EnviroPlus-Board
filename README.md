@@ -21,9 +21,9 @@ It measures temperature, humidity, air pressure, gas resistance, light and sound
 ## Features
 
 - Four LCD pages: Main, Min / Max, Wi-Fi, System
-- Display turns off automatically after 2 minutes of inactivity
-- RGB LED shows the air quality status as a colour
-- In sleep mode the LED pulses softly in the dark and stays off in brighter light
+- Screensaver after 2 minutes of inactivity: two cartoon eyes (white ovals, moving pupils) with an outline in the air quality colour; the eyelids show the mood (open, sceptical, angry, sleepy during warm-up), with randomised blinking and the occasional wink; brightness follows the ambient light
+- RGB LED shows the air quality (green / yellow / red) at very low brightness on the data pages; off during warm-up and in the screensaver
+- Wi-Fi switches off at night (00:00–06:00 local time, NTP time with CET/CEST) to match the router's Wi-Fi schedule
 - Web dashboard with live values (updated every 5 s) and 3-hour history charts
 - JSON endpoints `/data` and `/history` for use in other tools, e.g. Home Assistant
 - Pressure converted to sea level using the configured altitude
@@ -70,19 +70,19 @@ All pin assignments live in [`src/config.py`](src/config.py).
    ```
 
    **Never upload your real `secrets.py` to GitHub.**
-4. Restart the Pico and press **B** to turn on Wi-Fi. The web server starts automatically once connected; the IP address appears on the Wi-Fi page.
+4. Restart the Pico. Wi-Fi starts automatically; the web server starts once connected and the IP address appears on the Wi-Fi page.
 5. Open that IP address in a browser to see the dashboard.
 
-To start Wi-Fi automatically at boot, uncomment `WIFI_AUTOSTART = True` in `config.py`.
+Wi-Fi starts at boot (`WIFI_AUTOSTART = True` in `config.py`) and switches off between `WIFI_OFF_FROM` and `WIFI_OFF_UNTIL`. The time comes via NTP (`NTP_HOSTS`, default `pool.ntp.org`) as soon as Wi-Fi is connected. Without a valid time the schedule does nothing and Wi-Fi stays on. The Wi-Fi page shows the schedule status.
 
 ## Controls
 
 | Button | Action |
 |---|---|
-| A | single click: backlight on/off · double click: rotate display 90° (saved across reboots) |
-| B | Wi-Fi and web server on/off |
-| X | next page |
-| Y | previous page |
+| A | single click: switch between data pages and eyes · double click: rotate display 90° (saved across reboots) |
+| B | Wi-Fi and web server on/off, then shows the Wi-Fi page; overrides the night schedule until the next switching time |
+| X | next page (from the eyes: back to the data pages) |
+| Y | previous page (from the eyes: back to the data pages) |
 
 ## Calibration
 
@@ -97,7 +97,8 @@ The offsets in `config.py` apply to one specific setup and measuring interval. R
 
 Findings from comparison measurements:
 
-- With the backlight on for longer than about 20 minutes, the station reads too high.
+- With the backlight on for longer than about 20 minutes, the station reads too high. The eyes screensaver keeps the backlight on at low brightness, so recalibrate `TEMP_OFFSET` after a few days in this mode.
+- Wi-Fi is off at night; the radio chip produces less heat then, so night readings may be slightly low.
 - The sensor runs on a 3-second interval; recalibrate the temperature offset at the final location.
 - After moving the station, delete `iaq_baseline.txt` on the Pico (with the program stopped) so the air quality baseline starts learning again.
 
@@ -117,12 +118,15 @@ The watchdog reboots the Pico if the main loop hangs. It is disabled by default 
 | [`iaq.py`](src/iaq.py) | Relative air quality from gas resistance (shared with the BME690 project) |
 | [`history.py`](src/history.py) | 3-hour history for the charts |
 | [`system.py`](src/system.py) | Pico diagnostics: memory, flash, reset cause |
-| [`display.py`](src/display.py) | LCD pages and LED control |
-| [`web.py`](src/web.py) | HTML dashboard, endpoints `/data` and `/history` |
+| [`display.py`](src/display.py) | LCD pages, eyes mode and LED control |
+| [`eyes.py`](src/eyes.py) | Animated eyes screensaver |
+| [`web.py`](src/web.py) | Web server, endpoints `/`, `/data` and `/history` |
+| [`index.html`](src/index.html) | Dashboard page; streamed from flash in small chunks to save RAM |
 | [`wifi.py`](src/wifi.py) | Wi-Fi state machine with reconnect |
+| [`wifi_schedule.py`](src/wifi_schedule.py) | Night-time Wi-Fi schedule with NTP and CET/CEST (shared with the BME690 project) |
 | [`secrets_example.py`](src/secrets_example.py) | Template for your Wi-Fi credentials |
 
-The station creates `iaq_baseline.txt` on the Pico by itself; it is not part of this repository.
+The station creates `iaq_baseline.txt` and `rotation.txt` on the Pico by itself; they are not part of this repository.
 
 ## Related project
 
