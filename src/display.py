@@ -152,6 +152,7 @@ class Display:
         self._eyes = eyes.Eyes()
         self._eyes_b = config.EYES_BRIGHTNESS_CURVE[0][1]   # aktuelle Augen-Helligkeit
         self._skip_lux = False
+        self._sleep = False           # Schlafmodus der Augen (WLAN-Aus-Fenster)
         self.rotation = _load_rotation()
         self.gfx = None
         self._create_gfx()
@@ -194,7 +195,18 @@ class Display:
 
     # ── Steuerung ─────────────────────────────────────────
     def _brightness(self):
-        return self._eyes_b if self.eyes_mode else config.BRIGHTNESS
+        if not self.eyes_mode:
+            return config.BRIGHTNESS
+        return config.EYES_SLEEP_BRIGHTNESS if self._sleep else self._eyes_b
+
+    def set_sleep(self, sleeping):
+        """Schlafmodus an/aus (main.py, gekoppelt an das WLAN-Aus-Fenster).
+        Wirkt nur im Augen-Modus; die Datenansicht bleibt unberuehrt."""
+        if sleeping == self._sleep:
+            return
+        self._sleep = sleeping
+        if self.eyes_mode:
+            self.gfx.set_backlight(self._brightness())
 
     def enter_eyes(self):
         # Mit der niedrigsten Stufe starten und die erste Messung verwerfen:
@@ -278,12 +290,13 @@ class Display:
         b = self._eyes_b + (target - self._eyes_b) * config.EYES_SMOOTH
         if abs(b - self._eyes_b) >= 0.005:
             self._eyes_b = b
-            self.gfx.set_backlight(b)
+            if not self._sleep:
+                self.gfx.set_backlight(b)
 
     def draw_eyes(self, color_key):
         """Ein Bild Augen-Animation."""
         pen = self.CYAN if color_key == "grey" else self._iaq_pen.get(color_key, self.CYAN)
-        self._eyes.draw(self.gfx, self.BLACK, self.WHITE, pen, color_key)
+        self._eyes.draw(self.gfx, self.BLACK, self.WHITE, pen, color_key, self._sleep)
         self.gfx.update()
 
     def draw(self, data):
@@ -459,4 +472,4 @@ class Display:
         ]
         self._kv_page("System", rows)
 
-# EOF 2026-11-11
+# EOF 2026-11-12

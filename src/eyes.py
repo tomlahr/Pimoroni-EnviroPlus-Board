@@ -27,6 +27,11 @@
 # Perioden plus Zufall - das Muster wiederholt sich praktisch nie. Dazu
 # gelegentliches Doppelblinzeln und bei guter Luft ab und zu ein Zwinkern.
 #
+# Schlafmodus (draw(..., sleeping=True), gekoppelt an das WLAN-Aus-Fenster):
+# Die Lider schliessen sich langsam (~5 s) bis auf einen schmalen Streifen,
+# der leicht "atmet"; ab und zu steigt ein kleines "z" auf. Blinzeln und
+# Umherschauen ruhen. Beim Aufwachen oeffnen sich die Lider ebenso langsam.
+#
 # Bildrate: Der ST7789-Treiber kennt kein Teil-Update (partial_update() ist
 # dort leer), jedes Bild ist ein Vollbild mit ~45 ms. Deshalb ein Bild alle
 # EYES_FRAME_MS (80 ms = 12,5 Bilder/s); die Hauptschleife bleibt frei.
@@ -73,6 +78,13 @@ _WINK = (0.50, 0.10, 0.00, 0.00, 0.00, 0.40, 1.0)
 _MOOD_EASE = 0.15   # Ueberblendung der Stimmung pro Bild (~1 s)
 _GAZE_EASE = 0.45   # Blicksprung pro Bild (~3 Bilder)
 
+_SLEEP_EASE = 0.05      # Einschlafen/Aufwachen pro Bild (~5 s)
+_SLEEP_OPEN = 0.06      # Lidoeffnung im Schlaf (schmaler Streifen)
+_SLEEP_BREATH = 0.03    # "Atmen" um diesen Wert
+_SLEEP_BREATH_S = 6.0   # Atemperiode in s
+_Z_EVERY_MS = 7000      # alle 7 s ein "z"
+_Z_LIFE_MS = 3200       # so lange steigt es auf
+
 
 def _rnd():
     return random.getrandbits(16) / 65535
@@ -98,6 +110,8 @@ class Eyes:
         self._seq_i = 0
         self._wink_eye = -1                 # -1 = beide Augen, 0/1 = ein Auge
         self._double = False
+        self._sleep = 0.0                   # 0 = wach ... 1 = schlaeft
+        self._t_z = 0
         self.reset()
 
     def reset(self):
@@ -148,7 +162,7 @@ class Eyes:
         lo, hi = m["sac"]
         self._t_sac = time.ticks_add(now, int((lo + (hi - lo) * _rnd()) * 1000))
 
-    def _step(self, mood):
+    def _step(self, mood, sleeping):
         now = time.ticks_ms()
         m = _MOODS.get(mood, _MOODS["grey"])
         if mood != self._mood:
@@ -158,12 +172,19 @@ class Eyes:
         for k in p:
             p[k] += (m[k] - p[k]) * _MOOD_EASE
 
-        if time.ticks_diff(now, self._t_sac) >= 0:
+        self._sleep += ((1.0 if sleeping else 0.0) - self._sleep) * _SLEEP_EASE
+        dozing = self._sleep > 0.5
+        if dozing:
+            self._tx, self._ty = 0.0, _PY * 0.5              # Blick ruht, leicht nach unten
+            self._seq = None
+            self._t_sac = time.ticks_add(now, 1500)          # nach dem Aufwachen kurz ruhig
+            self._t_blink = time.ticks_add(now, 2000)
+        elif time.ticks_diff(now, self._t_sac) >= 0:
             self._start_saccade(now, m)
         self._gx += (self._tx - self._gx) * _GAZE_EASE
         self._gy += (self._ty - self._gy) * _GAZE_EASE
 
-        if self._seq is None and time.ticks_diff(now, self._t_blink) >= 0:
+        if not dozing and self._seq is None and time.ticks_diff(now, self._t_blink) >= 0:
             self._start_blink(now, m)
         openness = [1.0, 1.0]
         if self._seq is not None:
@@ -176,12 +197,17 @@ class Eyes:
             self._seq_i += 1
             if self._seq_i >= len(self._seq):
                 self._seq = None
+        if self._sleep > 0.01:
+            t = time.ticks_diff(now, self._t0) / 1000
+            closed = _SLEEP_OPEN + _SLEEP_BREATH * math.sin(2 * math.pi * t / _SLEEP_BREATH_S)
+            s = self._sleep
+            openness = [o * (1 - s) + closed * s for o in openness]
         return openness
 
     # ── Zeichnen ─────────────────────────────────────────────
-    def draw(self, g, bg_pen, white_pen, line_pen, mood):
+    def draw(self, g, bg_pen, white_pen, line_pen, mood, sleeping=False):
         """Ein Bild in den Framebuffer zeichnen. update() macht der Aufrufer."""
-        openness = self._step(mood)
+        openness = self._step(mood, sleeping)
         p = self._p
         g.set_pen(bg_pen)
         g.clear()
@@ -197,6 +223,23 @@ class Eyes:
             g.set_pen(white_pen)
             g.circle(cx + px + 5, _CY + py - 6, _GR)
             self._lids(g, i, cx, openness[i], p, bg_pen, line_pen)
+        if self._sleep > 0.9:
+            self._zzz(g, line_pen)
+
+    def _zzz(self, g, pen):
+        """Ein kleines "z" steigt schraeg ueber dem rechten Auge auf."""
+        now = time.ticks_ms()
+        age = time.ticks_diff(now, self._t_z)
+        if age < 0 or age > _Z_EVERY_MS:
+            self._t_z = now
+            age = 0
+        if age > _Z_LIFE_MS:
+            return
+        f = age / _Z_LIFE_MS
+        x = _CX[1] + _HW - 6 + int(14 * f)
+        y = _CY - _HH - 8 - int(36 * f)
+        g.set_pen(pen)
+        g.text("z", x, y, -1, 2 if f < 0.5 else 3)
 
     def _lids(self, g, i, cx, op, p, bg_pen, line_pen):
         top = _CY - _HH
@@ -246,4 +289,4 @@ class Eyes:
             else:
                 last = None
 
-# EOF 2026-11-11
+# EOF 2026-11-12

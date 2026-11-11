@@ -56,6 +56,11 @@ BRIGHTNESS = 0.8         # Backlight Datenansicht 0.0..1.0 (gamma-korrigiert)
 # bei leuchtenden Augen gemessen).
 EYES_BRIGHTNESS_CURVE = ((9, 0.60), (60, 0.70), (250, 0.90))
 EYES_SMOOTH = 0.35            # Anteil pro Messung (alle 3 s), ~90 % nach 15 s
+# Schlafmodus: im WLAN-Aus-Fenster (WIFI_OFF_FROM bis WIFI_OFF_UNTIL) schliessen
+# die Augen bis auf einen schmalen Streifen; Backlight dann fest auf diesem
+# Wert statt nach Lichtkurve. Die weissen Flaechen sind dann fast weg - die
+# Kontur bleibt auch bei niedriger Stufe gut sichtbar.
+EYES_SLEEP_BRIGHTNESS = 0.4   # ~7,7 % Tastverhaeltnis
 EYES_FRAME_MS = 80            # 12,5 Bilder/s; ein Vollbild-Update dauert ~45 ms
 
 # Doppelklick auf Taste A dreht die Anzeige um 90 Grad weiter. Ein

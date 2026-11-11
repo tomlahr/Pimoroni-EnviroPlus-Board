@@ -117,6 +117,11 @@ class WifiSchedule:
         print("Zeitplan: WLAN", "an" if want else "aus")
         return "on" if want else "off"
 
+    def is_off_window(self):
+        """True im Aus-Fenster - nur mit gueltiger Uhrzeit. Das Enviro+
+        koppelt den Schlafmodus seiner Augen daran."""
+        return self.synced and self._in_off
+
     def manual(self):
         """Manueller Eingriff per Taste - gilt bis zum naechsten Schaltpunkt."""
         self.override = True
@@ -133,4 +138,4 @@ class WifiSchedule:
         return "aus %02d:%02d-%02d:%02d" % (self._from // 60, self._from % 60,
                                           self._until // 60, self._until % 60)
 
-# EOF 2026-11-11
+# EOF 2026-11-12

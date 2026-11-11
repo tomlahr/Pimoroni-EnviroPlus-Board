@@ -332,6 +332,7 @@ def main():
             server.stop()
         elif action == "on":
             net.enable()
+        scr.set_sleep(sched.is_off_window())      # Augen schlafen im WLAN-Aus-Fenster
 
         now = time.ticks_ms()
         up.tick()
@@ -390,4 +391,4 @@ def main():
 
 main()
 
-# EOF 2026-11-11
+# EOF 2026-11-12
