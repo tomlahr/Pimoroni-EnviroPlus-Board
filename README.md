@@ -21,7 +21,7 @@ It measures temperature, humidity, air pressure, gas resistance, light and sound
 ## Features
 
 - Four LCD pages: Main, Min / Max, Wi-Fi, System
-- Screensaver after 2 minutes of inactivity: two cartoon eyes (white ovals, moving pupils) with an outline in the air quality colour; the eyelids show the mood (open, sceptical, angry, sleepy during warm-up), with randomised blinking and the occasional wink; brightness follows the ambient light
+- Screensaver after 2 minutes of inactivity: two cartoon eyes (white ovals, moving pupils) with an outline in the air quality colour; the eyelids show the mood (open, sceptical, angry, sleepy during warm-up), with randomised blinking and the occasional wink; brightness follows the ambient light. During the night-time Wi-Fi window the eyes fall asleep (lids nearly closed, gentle breathing, a rising "z") at a fixed low brightness
 - RGB LED shows the air quality (green / yellow / red) at very low brightness on the data pages; off during warm-up and in the screensaver
 - Wi-Fi switches off at night (00:00–06:00 local time, NTP time with CET/CEST) to match the router's Wi-Fi schedule
 - Web dashboard with live values (updated every 5 s) and 3-hour history charts
