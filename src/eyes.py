@@ -27,10 +27,20 @@
 # Perioden plus Zufall - das Muster wiederholt sich praktisch nie. Dazu
 # gelegentliches Doppelblinzeln und bei guter Luft ab und zu ein Zwinkern.
 #
-# Schlafmodus (draw(..., sleeping=True), gekoppelt an das WLAN-Aus-Fenster):
+# Schlafmodus (draw(..., sleeping=True), per config.SLEEP_FROM/UNTIL):
 # Die Lider schliessen sich langsam (~5 s) bis auf einen schmalen Streifen,
-# der leicht "atmet"; ab und zu steigt ein kleines "z" auf. Blinzeln und
-# Umherschauen ruhen. Beim Aufwachen oeffnen sich die Lider ebenso langsam.
+# der leicht "atmet"; ab und zu steigt ein "z Z Z" treppenfoermig auf (jeder
+# Buchstabe groesser als der vorige). Blinzeln und Umherschauen ruhen. Beim
+# Aufwachen oeffnen sich die Lider ebenso langsam. peek() oeffnet kurz ein
+# Auge (Geraeusch in der Nacht), dann geht es weiter mit Schlafen.
+#
+# Brauen und Mund (optional, face.py): attach_face() haengt sie an; sie folgen
+# denselben Stimmungsschluesseln. Gaehnen und Kuss schliessen die Lider ueber
+# face.lid, waehrenddessen kein Blinzeln.
+#
+# Geraeuschreaktion (draw(..., ear=...), Zustand aus ears.py): "listen",
+# "startle", "annoyed" und "pfiff" ueberschreiben die Stimmung der Luftqualitaet fuer
+# die Lider und den Blick; die Konturfarbe bleibt die der Luftqualitaet.
 #
 # Bildrate: Der ST7789-Treiber kennt kein Teil-Update (partial_update() ist
 # dort leer), jedes Bild ist ein Vollbild mit ~45 ms. Deshalb ein Bild alle
@@ -60,14 +70,27 @@ _UNIT = [(math.cos(2 * math.pi * k / _N), math.sin(2 * math.pi * k / _N))
 # 0..1, gy = Blick nach unten (Pixel), sac = Sakkaden-Abstand s (min, max),
 # blink = mittlerer Blinzelabstand s, wink = Zwinkern, slow = langsam.
 _MOODS = {
-    "green":  dict(lid=0.00, tilt=0.00, bot=0.00, skew=0.00,
+    "green":  dict(lid=0.00, tilt=0.00, bot=0.00, skew=0.00, pr=14,
                    look=1.0, gy=0, sac=(1.2, 3.5), blink=3.5, wink=True, slow=False),
-    "yellow": dict(lid=0.33, tilt=-0.06, bot=0.00, skew=0.16,
+    "yellow": dict(lid=0.33, tilt=-0.06, bot=0.00, skew=0.16, pr=14,
                    look=0.7, gy=0, sac=(2.0, 5.0), blink=4.0, wink=False, slow=False),
-    "red":    dict(lid=0.30, tilt=0.26, bot=0.22, skew=0.00,
+    "red":    dict(lid=0.30, tilt=0.26, bot=0.22, skew=0.00, pr=14,
                    look=0.9, gy=6, sac=(0.6, 1.8), blink=2.5, wink=False, slow=False),
-    "grey":   dict(lid=0.52, tilt=-0.14, bot=0.00, skew=0.00,
+    "grey":   dict(lid=0.52, tilt=-0.14, bot=0.00, skew=0.00, pr=14,
                    look=0.5, gy=14, sac=(4.0, 8.0), blink=5.0, wink=False, slow=True),
+    # Geraeuschreaktion (pr = Pupillenradius, ease = Ueberblendung pro Bild)
+    # listen:  Lider ganz auf, Pupillen etwas groesser, Blick ruhig und mittig
+    # startle: schlagartig weit auf, Pupillen klein, Blick starr; danach Blinzeln
+    # annoyed: Lider halb, flacher Blick, Pupillen huschen unruhig
+    "listen":  dict(lid=0.00, tilt=0.00, bot=0.00, skew=0.00, pr=16, ease=0.25,
+                    look=0.35, gy=0, sac=(2.5, 5.0), blink=6.0, wink=False, slow=False),
+    "startle": dict(lid=0.00, tilt=0.00, bot=0.00, skew=0.00, pr=8, ease=0.80,
+                    look=0.0, gy=0, sac=(1.5, 2.5), blink=5.0, wink=False, slow=False),
+    "annoyed": dict(lid=0.45, tilt=0.04, bot=0.00, skew=0.00, pr=14, ease=0.20,
+                    look=1.0, gy=4, sac=(0.4, 1.0), blink=3.0, wink=False, slow=False),
+    # pfiff: verliebt - Blick ruhig nach vorn, sanft; mit face.py Herzpupillen
+    "pfiff":   dict(lid=0.00, tilt=-0.05, bot=0.00, skew=0.00, pr=15, ease=0.40,
+                    look=0.15, gy=0, sac=(2.5, 4.0), blink=6.0, wink=False, slow=False),
 }
 
 # Lidoeffnung pro Bild (80 ms): 1 = offen, 0 = zu
@@ -82,8 +105,13 @@ _SLEEP_EASE = 0.05      # Einschlafen/Aufwachen pro Bild (~5 s)
 _SLEEP_OPEN = 0.06      # Lidoeffnung im Schlaf (schmaler Streifen)
 _SLEEP_BREATH = 0.03    # "Atmen" um diesen Wert
 _SLEEP_BREATH_S = 6.0   # Atemperiode in s
-_Z_EVERY_MS = 7000      # alle 7 s ein "z"
-_Z_LIFE_MS = 3200       # so lange steigt es auf
+_PEEK_MS = 2500         # Dauer des Nacht-Blicks (ein Auge oeffnet kurz)
+_PEEK_OPEN = 0.45       # Lidoeffnung dabei
+_Z_CYCLE_MS = 8000      # "z Z Z" alle 8 s
+_Z_STEP_MS = 1200       # Abstand zwischen den drei Buchstaben
+_Z_HOLD_MS = 5600       # ab hier verschwinden alle drei
+# Buchstabe, Schriftgroesse, Lage (x, y) - treppenfoermig aufsteigend, wachsend
+_Z_LETTERS = (("z", 2, 184, 44), ("Z", 3, 198, 22), ("Z", 4, 212, 0))
 
 
 def _rnd():
@@ -99,7 +127,7 @@ class Eyes:
         # Statische Formen: Kontur (farbig, groesser) und weisse Flaeche
         self._ring = [_oval(cx, _CY, _HW + _LINE, _HH + _LINE) for cx in _CX]
         self._white = [_oval(cx, _CY, _HW, _HH) for cx in _CX]
-        self._p = {k: _MOODS["grey"][k] for k in ("lid", "tilt", "bot", "skew")}
+        self._p = {k: _MOODS["grey"][k] for k in ("lid", "tilt", "bot", "skew", "pr")}
         self._mood = "grey"
         self._gx = self._gy = 0.0           # aktueller Blick (Pupillenversatz)
         self._tx = self._ty = 0.0           # Blickziel
@@ -112,6 +140,11 @@ class Eyes:
         self._double = False
         self._sleep = 0.0                   # 0 = wach ... 1 = schlaeft
         self._t_z = 0
+        self._ear = ""                      # Stimmungsschluessel der Geraeuschreaktion
+        self._t_peek = time.ticks_add(self._t0, -_PEEK_MS - 1000)
+        self._peek_eye = 0
+        self._face = None                   # Brauen/Mund (face.py), optional
+        self._minute = None                 # Minute des Tages (Ortszeit) oder None
         self.reset()
 
     def reset(self):
@@ -121,6 +154,29 @@ class Eyes:
         self._seq = None
         self._t_sac = time.ticks_add(now, 1500)
         self._t_blink = time.ticks_add(now, 2000)
+
+    def attach_face(self, face):
+        self._face = face
+
+    def set_minute(self, minute):
+        self._minute = minute
+
+    def peek(self):
+        """Geraeusch in der Nacht: ein (zufaelliges) Auge oeffnet kurz.
+        Wirkt nur, wenn die Augen schlafen."""
+        if self._sleep > 0.5:
+            self._t_peek = time.ticks_ms()
+            self._peek_eye = int(_rnd() * 2) % 2
+
+    def _peek_w(self, now):
+        age = time.ticks_diff(now, self._t_peek)
+        if age < 0 or age > _PEEK_MS:
+            return 0.0
+        if age < 300:
+            return age / 300
+        if age < 1500:
+            return 1.0
+        return 1.0 - (age - 1500) / (_PEEK_MS - 1500)
 
     # ── Verhalten ────────────────────────────────────────────
     def _next_blink_ms(self, base_s):
@@ -162,18 +218,27 @@ class Eyes:
         lo, hi = m["sac"]
         self._t_sac = time.ticks_add(now, int((lo + (hi - lo) * _rnd()) * 1000))
 
-    def _step(self, mood, sleeping):
+    def _step(self, mood, sleeping, ear):
         now = time.ticks_ms()
-        m = _MOODS.get(mood, _MOODS["grey"])
-        if mood != self._mood:
-            self._mood = mood
+        key = ear if ear and not sleeping else mood          # Geraeusch geht vor
+        m = _MOODS.get(key, _MOODS["grey"])
+        if key != self._mood:
+            if self._mood == "startle":
+                self._t_blink = now                          # nach dem Schreck: Blinzeln
+            if key == "startle":
+                self._seq = None                             # laufendes Blinzeln abbrechen
+            self._mood = key
             self._t_sac = now                                # neuen Blick waehlen
         p = self._p
+        ease = m.get("ease", _MOOD_EASE)
         for k in p:
-            p[k] += (m[k] - p[k]) * _MOOD_EASE
+            p[k] += (m[k] - p[k]) * ease
 
         self._sleep += ((1.0 if sleeping else 0.0) - self._sleep) * _SLEEP_EASE
         dozing = self._sleep > 0.5
+        face = self._face
+        if face is not None:
+            face.step(now, key, dozing, self._minute, bool(ear) and not sleeping)
         if dozing:
             self._tx, self._ty = 0.0, _PY * 0.5              # Blick ruht, leicht nach unten
             self._seq = None
@@ -184,7 +249,9 @@ class Eyes:
         self._gx += (self._tx - self._gx) * _GAZE_EASE
         self._gy += (self._ty - self._gy) * _GAZE_EASE
 
-        if not dozing and self._seq is None and time.ticks_diff(now, self._t_blink) >= 0:
+        if (not dozing and self._seq is None and key != "startle"
+                and not (face is not None and face.busy)
+                and time.ticks_diff(now, self._t_blink) >= 0):
             self._start_blink(now, m)
         openness = [1.0, 1.0]
         if self._seq is not None:
@@ -197,49 +264,71 @@ class Eyes:
             self._seq_i += 1
             if self._seq_i >= len(self._seq):
                 self._seq = None
+        if face is not None and face.lid > 0.01:
+            lim = 1.0 - face.lid                          # Gaehnen/Kuss: Lider sinken
+            openness = [o if o < lim else lim for o in openness]
         if self._sleep > 0.01:
             t = time.ticks_diff(now, self._t0) / 1000
             closed = _SLEEP_OPEN + _SLEEP_BREATH * math.sin(2 * math.pi * t / _SLEEP_BREATH_S)
             s = self._sleep
-            openness = [o * (1 - s) + closed * s for o in openness]
+            w = self._peek_w(now)
+            if w > 0:
+                # das gewaehlte Auge oeffnet sich, das andere bleibt zu
+                peek = closed + (_PEEK_OPEN - closed) * w
+                cl = [closed, closed]
+                cl[self._peek_eye] = peek
+            else:
+                cl = (closed, closed)
+            openness = [openness[i] * (1 - s) + cl[i] * s for i in (0, 1)]
         return openness
 
     # ── Zeichnen ─────────────────────────────────────────────
-    def draw(self, g, bg_pen, white_pen, line_pen, mood, sleeping=False):
-        """Ein Bild in den Framebuffer zeichnen. update() macht der Aufrufer."""
-        openness = self._step(mood, sleeping)
+    def draw(self, g, bg_pen, white_pen, line_pen, mood, sleeping=False, ear="", face_pens=None):
+        """Ein Bild in den Framebuffer zeichnen. update() macht der Aufrufer.
+        ear = Zustand der Geraeuschreaktion ("", "listen", "startle", "annoyed")."""
+        openness = self._step(mood, sleeping, ear)
         p = self._p
         g.set_pen(bg_pen)
         g.clear()
         px, py = int(self._gx), int(self._gy)
+        pr = int(p["pr"] + 0.5)
+        face = self._face if face_pens is not None else None
+        heart = face is not None and face.heart_eyes
+        now = time.ticks_ms()
         for i in (0, 1):
             cx = _CX[i]
             g.set_pen(line_pen)
             g.polygon(self._ring[i])
             g.set_pen(white_pen)
             g.polygon(self._white[i])
-            g.set_pen(bg_pen)
-            g.circle(cx + px, _CY + py, _PR)
+            if heart:                                       # Pfiff: Herz statt Pupille
+                face.pupil_heart(g, face_pens[2], cx + px, _CY + py, now)
+            else:
+                g.set_pen(bg_pen)
+                g.circle(cx + px, _CY + py, pr)
             g.set_pen(white_pen)
             g.circle(cx + px + 5, _CY + py - 6, _GR)
             self._lids(g, i, cx, openness[i], p, bg_pen, line_pen)
+        if face is not None:
+            face.draw(g, face_pens + (bg_pen,), now)
         if self._sleep > 0.9:
             self._zzz(g, line_pen)
 
     def _zzz(self, g, pen):
-        """Ein kleines "z" steigt schraeg ueber dem rechten Auge auf."""
+        """"z Z Z" steigt ueber dem rechten Auge treppenfoermig auf: die drei
+        Buchstaben erscheinen nacheinander (jeder groesser und weiter oben),
+        bleiben kurz stehen und verschwinden gemeinsam; dann Pause."""
         now = time.ticks_ms()
         age = time.ticks_diff(now, self._t_z)
-        if age < 0 or age > _Z_EVERY_MS:
+        if age < 0 or age > _Z_CYCLE_MS:
             self._t_z = now
             age = 0
-        if age > _Z_LIFE_MS:
+        if age > _Z_HOLD_MS:
             return
-        f = age / _Z_LIFE_MS
-        x = _CX[1] + _HW - 6 + int(14 * f)
-        y = _CY - _HH - 8 - int(36 * f)
         g.set_pen(pen)
-        g.text("z", x, y, -1, 2 if f < 0.5 else 3)
+        for k, (ch, scale, x, y) in enumerate(_Z_LETTERS):
+            if age >= k * _Z_STEP_MS:
+                g.text(ch, x, y, -1, scale)
 
     def _lids(self, g, i, cx, op, p, bg_pen, line_pen):
         top = _CY - _HH
@@ -289,4 +378,4 @@ class Eyes:
             else:
                 last = None
 
-# EOF 2026-11-12
+# EOF 2026-11-18

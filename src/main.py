@@ -9,6 +9,9 @@
 #   2. Restliche Module erst DANACH importieren. (web.py baut seit
 #      2026-11-11 kein HTML mehr beim Import, die Seite kommt aus index.html.)
 #
+# Geraeuschreaktion (ears.py) und stuendliches Log (hourlog.py): beide
+# arbeiten mit festen Zaehlern ohne Puffer, der Heap bleibt unberuehrt.
+#
 # Zustand bei Bedarf: build_state() setzt das grosse Zustands-dict nur noch
 # zusammen, wenn das Display neu zeichnet oder eine /data-Anfrage kommt -
 # nicht mehr 100x pro Sekunde auf Vorrat.
@@ -128,7 +131,15 @@ def main():
     import wifi_schedule
     import history
     import web
+    import ears as ears_mod
+    import hourlog
     gc.collect()
+    scr.load_face()             # Brauen/Mund jetzt laden, solange der Heap noch zusammenhaengt
+    eye_tone = None
+    if getattr(config, "EYES_TONE", False):
+        import sun
+        eye_tone = sun.EyeTone()    # Augenweiss nach Sonnenstand
+    last_tone_min = -1
 
     i2c = sensors.make_i2c()
     weather = sensors.Weather(i2c)
@@ -144,6 +155,7 @@ def main():
                                        config.NTP_HOSTS, config.NTP_RESYNC_MS,
                                        config.NTP_RETRY_MS)
     server = web.WebServer(config.WEB_PORT)
+    ears = ears_mod.Ears()
 
     btn_a = EdgeButton(config.BTN_A)  # Einfachklick Daten <-> Augen, Doppelklick drehen
     a_clicks = ClickCounter(config.DOUBLE_CLICK_MS)
@@ -163,6 +175,7 @@ def main():
     # Statische Systemwerte einmalig ermitteln - aendern sich nicht zur Laufzeit.
     reset_cause = system.reset_cause()
     firmware = system.firmware_info()
+    hlog = hourlog.HourLog(config.LOG_FILE, config.LOG_MAX_BYTES, reset_cause)
 
     # Abgeleitete Werte: EINMAL pro Sensormessung berechnet, nicht pro
     # Schleifendurchlauf. build_state() und die LED lesen nur noch ab.
@@ -188,6 +201,7 @@ def main():
         vpd = sensors.vpd_kpa(w["temp"], w["humidity"])
         iaq_score = iaq.score(w["gas_kohm"])
         iaq_label, iaq_color = sensors.iaq_classify(iaq_score)
+        hlog.add_climate(w["temp"], w["humidity"], w["pressure"], lux, iaq_score)
 
         for key in trend_keys:
             minmax.update(key, w[key])
@@ -267,8 +281,12 @@ def main():
     last_sensor = last_mic = last_internal = last_display = last_eyes = 0
     last_system = last_probe = last_iaq_save = now0
     last_activity = now0
+    last_loop = last_clock = now0
+    night = False
     force_draw = False
     last_server_try = now0
+    sleep_from = config.SLEEP_FROM[0] * 60 + config.SLEEP_FROM[1]
+    sleep_until = config.SLEEP_UNTIL[0] * 60 + config.SLEEP_UNTIL[1]
 
     # Optional: WLAN direkt einschalten (config.WIFI_AUTOSTART, standardmaessig aus)
     if getattr(config, "WIFI_AUTOSTART", False):
@@ -332,10 +350,29 @@ def main():
             server.stop()
         elif action == "on":
             net.enable()
-        scr.set_sleep(sched.is_off_window())      # Augen schlafen im WLAN-Aus-Fenster
 
         now = time.ticks_ms()
         up.tick()
+        hlog.note_loop(time.ticks_diff(now, last_loop), scr.eyes_mode)
+        last_loop = now
+
+        # Einmal pro Sekunde: Ortszeit -> Schlaffenster und Stundenlog
+        if time.ticks_diff(now, last_clock) >= 1000:
+            last_clock = now
+            lt = wifi_schedule.local_time() if sched.synced else None
+            if lt is not None:
+                minute = lt[3] * 60 + lt[4]
+                night = (minute >= sleep_from or minute < sleep_until) \
+                    if sleep_from > sleep_until else (sleep_from <= minute < sleep_until)
+                scr.set_clock(minute)
+                if eye_tone is not None and minute != last_tone_min:
+                    last_tone_min = minute
+                    scr.set_eye_tone(eye_tone.rgb(lt, wifi_schedule.utc_offset_s() // 60))
+            else:
+                night = False
+                scr.set_clock(None)
+            scr.set_sleep(night)                  # Augen schlafen im Schlaffenster
+            hlog.tick(now, lt, ears, net.connected)
 
         if not scr.eyes_mode and time.ticks_diff(now, last_activity) >= config.AUTO_OFF_IDLE_MS:
             scr.enter_eyes()
@@ -346,10 +383,16 @@ def main():
             if scr.eyes_mode:
                 scr.eyes_light(lux)
 
-        if time.ticks_diff(now, last_mic) >= config.MIC_INTERVAL_MS:
+        if time.ticks_diff(now, last_mic) >= (
+                config.MIC_EYES_INTERVAL_MS if scr.eyes_mode else config.MIC_INTERVAL_MS):
             last_mic = now
+            t_mic = time.ticks_ms()
             db = mic.read_dbfs()
+            mic_ms = time.ticks_diff(time.ticks_ms(), t_mic)
             minmax.update("db", db)
+            ears.update(db, now, mic_ms, night, mic.tone_hz)
+            if ears.take_wake():
+                scr.wake_peek()
 
         if time.ticks_diff(now, last_internal) >= config.INTERNAL_TEMP_INTERVAL_MS:
             last_internal = now
@@ -359,6 +402,7 @@ def main():
             last_system = now
             mem_free = sysstats.sample()
             flash_kb = system.flash_free_kb()
+            hlog.add_mem(mem_free, sysstats.block)
 
         if time.ticks_diff(now, last_probe) >= config.HEAP_PROBE_INTERVAL_MS:
             last_probe = now
@@ -380,7 +424,7 @@ def main():
             if time.ticks_diff(now, last_eyes) >= config.EYES_FRAME_MS:
                 last_eyes = now
                 force_draw = False
-                scr.draw_eyes(iaq_color)
+                scr.draw_eyes(iaq_color, ears.state)
         elif force_draw or time.ticks_diff(now, last_display) >= config.DISPLAY_INTERVAL_MS:
             last_display = now
             force_draw = False
@@ -391,4 +435,4 @@ def main():
 
 main()
 
-# EOF 2026-11-12
+# EOF 2026-11-15

@@ -36,16 +36,22 @@ def _last_sunday(year, month):
     return 31 - (weekday + 1) % 7
 
 
-def local_time():
-    """Deutsche Ortszeit als localtime-Tupel. Die interne Uhr steht nach
-    ntptime.settime() auf UTC. Umstellung jeweils 01:00 UTC am letzten
-    Sonntag im Maerz bzw. Oktober."""
-    utc = time.time()
+def utc_offset_s(utc=None):
+    """Versatz der deutschen Ortszeit zu UTC in s (3600 MEZ, 7200 MESZ).
+    Umstellung jeweils 01:00 UTC am letzten Sonntag im Maerz bzw. Oktober."""
+    if utc is None:
+        utc = time.time()
     year = time.localtime(utc)[0]
     start = time.mktime((year, 3, _last_sunday(year, 3), 1, 0, 0, 0, 0))
     end = time.mktime((year, 10, _last_sunday(year, 10), 1, 0, 0, 0, 0))
-    offset = 7200 if start <= utc < end else 3600
-    return time.localtime(utc + offset)
+    return 7200 if start <= utc < end else 3600
+
+
+def local_time():
+    """Deutsche Ortszeit als localtime-Tupel. Die interne Uhr steht nach
+    ntptime.settime() auf UTC."""
+    utc = time.time()
+    return time.localtime(utc + utc_offset_s(utc))
 
 
 class WifiSchedule:

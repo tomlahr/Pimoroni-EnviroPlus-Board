@@ -3,7 +3,7 @@
 # als dict oder Zahl zurueck - kein Tupel-Entpacken mehr im Hauptcode.
 
 import math
-import machine
+import time
 from machine import ADC
 from pimoroni_i2c import PimoroniI2C
 from breakout_bme68x import (
@@ -136,6 +136,14 @@ class Microphone:
         self.buf = array("H", (0 for _ in range(self.n)))
         self.fullscale = config.MIC_FULLSCALE
         self.trim = config.MIC_DB_TRIM
+        self.tone_hz = 0                # Frequenz eines reinen Tons im letzten Burst (0 = keiner)
+        self._tone = None
+        if getattr(config, "PFIFF_ENABLED", False):
+            try:
+                import tone
+                self._tone = tone.tone_hz
+            except Exception as error:      # kein Ton-Modul: Pfiff-Erkennung bleibt aus
+                print("Ton-Analyse nicht geladen:", error)
 
     def read_dbfs(self):
         # Reine Ganzzahl-Rechnung: Auf dem RP2040 legt MicroPython jede Float
@@ -147,8 +155,10 @@ class Microphone:
         buf = self.buf
         adc = self.adc
         n = self.n
+        t0 = time.ticks_us()
         for i in range(n):
             buf[i] = adc.read_u16() >> 4
+        dur_us = time.ticks_diff(time.ticks_us(), t0)
 
         mean = (sum(buf) + n // 2) // n   # gerundet statt abgeschnitten
         sq = 0
@@ -159,7 +169,12 @@ class Microphone:
         # Untergrenze = alte Grenze (1 von 32768) im neuen Massstab.
         if rms < 0.0625:
             rms = 0.0625
-        return 20.0 * math.log10(rms / self.fullscale) + self.trim
+        db = 20.0 * math.log10(rms / self.fullscale) + self.trim
+        self.tone_hz = 0
+        if self._tone is not None and db >= config.MIC_TONE_MIN_DBFS:
+            lo, hi = config.PFIFF_BAND_HZ
+            self.tone_hz = self._tone(buf, n, mean, rms, dur_us, lo, hi, config.PFIFF_CORR_PCT)
+        return db
 
     def describe(self, dbfs):
         if dbfs < -50:

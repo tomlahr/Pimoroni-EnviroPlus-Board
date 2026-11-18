@@ -144,6 +144,19 @@ def _save_rotation(rot):
         pass
 
 
+def _tone_colors(white):
+    """Aus dem Augenweiss die passenden Gesichtsfarben ableiten:
+    Brauen 82 % des Weiss (gleicher Farbton), Mund und Rosa mit derselben
+    Helligkeit gedimmt, aber nie unter 40 % (sonst kaum noch rot)."""
+    k = max(white) * 100 // 255
+    if k < 40:
+        k = 40
+    brow = tuple(v * 82 // 100 for v in white)
+    red = (255 * k // 100, 72 * k // 100, 72 * k // 100)
+    pink = (255 * k // 100, 120 * k // 100, 180 * k // 100)
+    return white, brow, red, pink
+
+
 class Display:
     def __init__(self):
         # Framebuffer selbst anlegen und bei jeder Drehung wiederverwenden.
@@ -152,7 +165,12 @@ class Display:
         self._eyes = eyes.Eyes()
         self._eyes_b = config.EYES_BRIGHTNESS_CURVE[0][1]   # aktuelle Augen-Helligkeit
         self._skip_lux = False
-        self._sleep = False           # Schlafmodus der Augen (WLAN-Aus-Fenster)
+        self._sleep = False           # Schlafmodus der Augen (Schlaffenster)
+        self._face_tried = False      # Brauen/Mund (face.py) wurden schon versucht
+        self._face_on = False
+        self._tone_rgb = (255, 255, 255)   # aktuelles Augenweiss (sun.py)
+        self._tone_cols = _tone_colors(self._tone_rgb)
+        self._tone_err = False
         self.rotation = _load_rotation()
         self.gfx = None
         self._create_gfx()
@@ -187,11 +205,19 @@ class Display:
         self.LIGHTGREY = self.GREY  # war farbgleich - spart einen Palettenplatz
         self.FOOTER_GREY = g.create_pen(210, 210, 210)
         self.HEADER_BG = g.create_pen(15, 40, 28)
+        # Augen-Pens mit Tageszeit-Toenung (sun.py): eigene Plaetze, damit die
+        # Datenansicht unveraendert bleibt. Farbwerte minimal anders als WHITE,
+        # FOOTER_GREY und RED, falls create_pen gleiche Farben zusammenlegt.
+        wh, br, rd, pk = self._tone_cols
+        self.EYE_WHITE = g.create_pen(*wh)
+        self.BROW = g.create_pen(*br)
+        self.FACE_RED = g.create_pen(*rd)
+        self.PINK = g.create_pen(*pk)                # Zunge und Herzen (face.py)
         self._iaq_pen = {
             "green": self.GREEN, "yellow": self.YELLOW,
             "red": self.RED, "grey": self.GREY,
         }
-        # Belegt: 10 von 16 Palettenplaetzen.
+        # Belegt: 14 von 16 Palettenplaetzen.
 
     # ── Steuerung ─────────────────────────────────────────
     def _brightness(self):
@@ -200,13 +226,61 @@ class Display:
         return config.EYES_SLEEP_BRIGHTNESS if self._sleep else self._eyes_b
 
     def set_sleep(self, sleeping):
-        """Schlafmodus an/aus (main.py, gekoppelt an das WLAN-Aus-Fenster).
+        """Schlafmodus an/aus (main.py, per config.SLEEP_FROM/SLEEP_UNTIL).
         Wirkt nur im Augen-Modus; die Datenansicht bleibt unberuehrt."""
         if sleeping == self._sleep:
             return
         self._sleep = sleeping
         if self.eyes_mode:
             self.gfx.set_backlight(self._brightness())
+
+    def load_face(self):
+        """Beim Start aufrufen (main.py): Brauen und Mund (face.py) laden,
+        solange der Heap noch nicht fragmentiert ist - spaeter schrumpft der
+        groesste freie Block auf wenige kB (log.csv, block_min). Nur bei
+        EYES_FACE und genug freiem Heap, hoechstens ein Versuch. Fehlschlag:
+        ohne Gesicht weiterlaufen."""
+        if self._face_tried:
+            return
+        self._face_tried = True
+        if not getattr(config, "EYES_FACE", False):
+            return
+        gc.collect()
+        if gc.mem_free() < config.EYES_FACE_MIN_FREE:
+            print("Gesicht: zu wenig RAM (%d B frei)" % gc.mem_free())
+            return
+        try:
+            import face
+            self._eyes.attach_face(face.Face())
+            self._face_on = True
+            gc.collect()
+            print("Gesicht geladen, RAM frei:", gc.mem_free())
+        except Exception as error:      # MemoryError u. a.
+            print("Gesicht nicht geladen:", error)
+        gc.collect()
+
+    def set_eye_tone(self, rgb):
+        """Augenweiss (und passend gedimmt Brauen, Mund, Herzen) setzen.
+        Schreibt die Palette nur bei Aenderung."""
+        if rgb == self._tone_rgb:
+            return
+        self._tone_rgb = rgb
+        self._tone_cols = _tone_colors(rgb)
+        wh, br, rd, pk = self._tone_cols
+        try:
+            g = self.gfx
+            g.update_pen(self.EYE_WHITE, *wh)
+            g.update_pen(self.BROW, *br)
+            g.update_pen(self.FACE_RED, *rd)
+            g.update_pen(self.PINK, *pk)
+        except Exception as error:
+            if not self._tone_err:
+                print("Augenfarbe:", error)
+                self._tone_err = True
+
+    def set_clock(self, minute):
+        """Minute des Tages (Ortszeit) oder None - fuer Gaehnen und Kuss."""
+        self._eyes.set_minute(minute)
 
     def enter_eyes(self):
         # Mit der niedrigsten Stufe starten und die erste Messung verwerfen:
@@ -293,11 +367,17 @@ class Display:
             if not self._sleep:
                 self.gfx.set_backlight(b)
 
-    def draw_eyes(self, color_key):
-        """Ein Bild Augen-Animation."""
+    def draw_eyes(self, color_key, ear=""):
+        """Ein Bild Augen-Animation. ear = Geraeuschzustand aus ears.py."""
         pen = self.CYAN if color_key == "grey" else self._iaq_pen.get(color_key, self.CYAN)
-        self._eyes.draw(self.gfx, self.BLACK, self.WHITE, pen, color_key, self._sleep)
+        fp = (self.BROW, self.FACE_RED, self.PINK) if self._face_on else None
+        self._eyes.draw(self.gfx, self.BLACK, self.EYE_WHITE, pen, color_key, self._sleep, ear, fp)
         self.gfx.update()
+
+    def wake_peek(self):
+        """Geraeusch in der Nacht: ein Auge oeffnet kurz (nur im Schlafmodus)."""
+        if self.eyes_mode:
+            self._eyes.peek()
 
     def draw(self, data):
         if self.eyes_mode:
@@ -472,4 +552,4 @@ class Display:
         ]
         self._kv_page("System", rows)
 
-# EOF 2026-11-12
+# EOF 2026-11-15

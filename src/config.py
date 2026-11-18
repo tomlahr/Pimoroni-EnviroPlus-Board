@@ -23,6 +23,7 @@ MIC_SAMPLES = 512        # Samples pro Pegelmessung (Burst)
 # Vollausschlag daher 2048 statt 32768 - dBFS-Werte bleiben praktisch gleich.
 MIC_FULLSCALE = 2048     # halber 12-Bit-ADC-Hub (0..4095)
 MIC_DB_TRIM = 0.0        # optionaler Offset in dB, rein kosmetisch
+MIC_TONE_MIN_DBFS = -58.0  # Ton-Analyse (tone.py) nur oberhalb dieses Pegels - spart Rechenzeit
 
 # ── RGB-LED (oben mittig am LCD) ──────────────────────────
 LED_R = 6
@@ -56,12 +57,40 @@ BRIGHTNESS = 0.8         # Backlight Datenansicht 0.0..1.0 (gamma-korrigiert)
 # bei leuchtenden Augen gemessen).
 EYES_BRIGHTNESS_CURVE = ((9, 0.60), (60, 0.70), (250, 0.90))
 EYES_SMOOTH = 0.35            # Anteil pro Messung (alle 3 s), ~90 % nach 15 s
-# Schlafmodus: im WLAN-Aus-Fenster (WIFI_OFF_FROM bis WIFI_OFF_UNTIL) schliessen
-# die Augen bis auf einen schmalen Streifen; Backlight dann fest auf diesem
-# Wert statt nach Lichtkurve. Die weissen Flaechen sind dann fast weg - die
-# Kontur bleibt auch bei niedriger Stufe gut sichtbar.
-EYES_SLEEP_BRIGHTNESS = 0.4   # ~7,7 % Tastverhaeltnis
+# Schlafmodus: im Schlaffenster (SLEEP_FROM bis SLEEP_UNTIL, Ortszeit, braucht
+# NTP) schliessen die Augen bis auf einen schmalen Streifen; Backlight dann
+# fest auf diesem Wert statt nach Lichtkurve. Die weissen Flaechen sind dann
+# fast weg - die Kontur bleibt auch bei dieser Stufe gut sichtbar.
+# Das Fenster ist bewusst frueher als die WLAN-Nachtabschaltung (00:00).
+SLEEP_FROM = (23, 0)
+SLEEP_UNTIL = (6, 0)
+EYES_SLEEP_BRIGHTNESS = 0.6   # ~24 % Tastverhaeltnis (am Geraet abgestimmt)
 EYES_FRAME_MS = 80            # 12,5 Bilder/s; ein Vollbild-Update dauert ~45 ms
+# Brauen und Mund (face.py). Wird erst beim ersten Augen-Modus geladen, und
+# nur, wenn dann mindestens EYES_FACE_MIN_FREE Byte Heap frei sind.
+EYES_FACE = True
+EYES_FACE_MIN_FREE = 40000
+EYES_YAWN_FROM = (21, 30)     # ab hier gelegentlich Gaehnen (Ortszeit)
+EYES_YAWN_MEAN_S = 600        # im Mittel alle 10 min (zufaellig)
+EYES_KISS_FROM = (18, 0)      # Kuss nur abends bei guter Luft und Ruhe
+EYES_KISS_UNTIL = (23, 0)
+EYES_KISS_MEAN_S = 900        # im Mittel alle 15 min (zufaellig)
+
+# Augenweiss nach Tageszeit (sun.py), synchron zu Sonnenauf-/-untergang.
+# Sonnenzeiten werden lokal berechnet (Breite/Laenge, Ortszeit) - kein Internet.
+# Brauen, Mund und Herzen werden passend mitgedimmt; die Konturfarbe (Luftguete)
+# bleibt. Abstimmung am Geraet: EYES_TONE_FORCE = 0 / 1 / 2 zeigt die Stufe fest.
+EYES_TONE = True
+LATITUDE = 53.69              # Standort (2 Nachkommastellen reichen)
+LONGITUDE = 9.67
+EYES_WHITE_DAY = (255, 255, 255)     # tagsueber: helles Weiss
+EYES_WHITE_EVENING = (235, 200, 150) # abends: warmweiss, gedimmt
+EYES_WHITE_NIGHT = (80, 56, 32)      # nachts: kleinste noch sichtbare Stufe
+EYES_TONE_SUN_MARGIN_MIN = 30        # Abend beginnt so lange vor Sonnenuntergang; morgens +- um den Aufgang
+EYES_TONE_EVENING_LATEST = (20, 0)   # ... aber spaetestens hier (Sommer)
+EYES_TONE_RAMP_MIN = 60              # Ueberblendung Tag -> Abend
+EYES_TONE_NIGHT_AT = (22, 0)         # ab hier Nacht-Stufe (Ueberblendung 30 min davor)
+EYES_TONE_FORCE = None               # Test: 0 = Tag, 1 = Abend, 2 = Nacht (fest), None = automatisch
 
 # Doppelklick auf Taste A dreht die Anzeige um 90 Grad weiter. Ein
 # Einfachklick wird erst nach DOUBLE_CLICK_MS ausgefuehrt - erst dann steht
@@ -111,6 +140,44 @@ IAQ_BASELINE_FILE = "iaq_baseline.txt"
 IAQ_GOOD = 0.66
 IAQ_OK = 0.33
 
+# ── Geraeuschreaktion der Augen (ears.py) ─────────────────
+# Alle Schwellen in dB ueber dem Grundrauschen (Huellkurve, faellt sofort,
+# steigt langsam). Messung Schreibtisch 2026-11-15: Ruhe -70,7 dBFS; Sprechen
+# +8 dB (Spitze +19), TV +6 dB, Klatschen/Tuer Spitzen +46..+53 dB.
+EARS_LISTEN_ON_DB = 9.0      # Zuhoeren ein (Median der letzten 3 Messungen)
+EARS_LISTEN_OFF_DB = 6.0     # Zuhoeren aus (nach EARS_HANG_MS darunter)
+EARS_HANG_MS = 3000          # Nachlauf, damit Sprechpausen nicht zerhacken
+EARS_STARTLE_DB = 25.0       # Erschrecken: Einzelmessung ueber dieser Schwelle ...
+EARS_JUMP_DB = 15.0          # ... UND Sprung zur Vormessung mindestens so gross
+EARS_STARTLE_MS = 1200       # so lange bleiben die Augen weit auf
+EARS_LOCK_MS = 3500          # danach so lange kein neues Ereignis
+EARS_ANNOY_MS = 120000       # Zuhoeren laenger als das -> genervt
+EARS_ANNOY_MAX_MS = 180000    # nach so langem Genervtsein gibt er auf (Normalzustand)
+EARS_WAKE_DB = 22.0          # Nacht: ab dieser Spitze oeffnet ein Auge kurz
+EARS_BASE_RANGE = (-74.0, -62.0)   # Grundrauschen bleibt in diesem Bereich (dBFS)
+EARS_RISE_QUIET_DB_MIN = 0.5 # Grundrauschen steigt in Ruhe um max. so viel pro Minute
+EARS_RISE_LOUD_DB_MIN = 0.1  # ... bei anhaltendem Laerm (>3 dB ueber Grund) langsamer
+
+# Pfiff (Cat-Call, ears.py + tone.py): reiner Ton mit Tonhoehenverlauf. Der Pfiff
+# muss mindestens PFIFF_MIN_READS Messungen (je ~100 ms) am Stueck rein klingen
+# und sich um mindestens PFIFF_GLIDE_PCT % in der Tonhoehe aendern - gleichbleibende
+# Pieptoene (Mikrowelle, Rauchmelder) loesen nichts aus. Abstimmung am Geraet:
+# PFIFF_DEBUG = True schreibt jede erkannte Tonmessung in die REPL.
+PFIFF_ENABLED = True
+PFIFF_BAND_HZ = (900, 4500)  # erlaubter Frequenzbereich der Grundwelle
+PFIFF_CORR_PCT = 80          # Reinheit des Tons (Autokorrelation in %), kleiner = toleranter
+PFIFF_MIN_DB = 12.0          # Ton mindestens so viel ueber dem Grundrauschen
+PFIFF_MIN_READS = 4          # Tonmessungen am Stueck (bei 100 ms = 0,4 s)
+PFIFF_GAP_MS = 250           # Luecke, die die Folge noch nicht abreisst
+PFIFF_GLIDE_PCT = 30         # geforderte Aenderung der Tonhoehe in der Folge
+PFIFF_MS = 4500              # so lange zeigen die Augen die Reaktion
+PFIFF_LOCK_MS = 8000         # danach so lange kein neuer Pfiff
+PFIFF_DEBUG = False
+
+# ── Betriebslog (hourlog.py) ──────────────────────────────
+LOG_FILE = "log.csv"         # eine Zeile pro Stunde, siehe hourlog.py
+LOG_MAX_BYTES = 24000        # darueber: log.csv -> log.csv.old (alte .old faellt weg)
+
 # ── Verlauf (Sparklines) ──────────────────────────────────
 HISTORY_LEN = 180            # Punkte; 180 x 60 s = 3 h
 HISTORY_INTERVAL_MS = 60000  # ein Verlaufspunkt pro Minute
@@ -120,6 +187,7 @@ SENSOR_INTERVAL_MS = 3000    # BME/LTR lesen (Paket 2: 3 s statt 1 s -> weniger 
 LOOP_SLEEP_MS = 10           # Bremse pro Schleifendurchlauf - fehlte bisher
 AUTO_OFF_IDLE_MS = 2 * 60 * 1000   # Augen-Bildschirmschoner nach 2 Min. ohne Tastendruck
 MIC_INTERVAL_MS = 500        # Pegel messen (laufend - Display UND Web zeigen ihn)
+MIC_EYES_INTERVAL_MS = 100   # im Augen-Modus schneller, sonst werden Knaller verpasst
 DISPLAY_INTERVAL_MS = 500    # Bildschirm neu zeichnen
 INTERNAL_TEMP_INTERVAL_MS = 10000  # interne Pico-Temp, langsam wechselnd
 SYSTEM_INTERVAL_MS = 2000    # RAM/Flash-Abfrage (statvfs kostet etwas)
@@ -137,6 +205,8 @@ WEB_PORT = 80
 WIFI_CHECK_MS = 1000       # Linkpruefung hoechstens so oft
 WIFI_RETRY_MS = 15000      # ohne Verbindung: neuer Versuch nach dieser Zeit
 WIFI_RESET_AFTER = 3       # nach so vielen Fehlversuchen Schnittstelle neu starten
+WIFI_DEAD_RESET_AFTER = 3  # Funkchip startet nicht (connect -> EPERM): so viele Fehler, dann Hardware-Reset
+WIFI_HARD_RESETS_MAX = 2   # hoechstens so viele Hardware-Resets in Folge (Schutz vor Neustartschleife)
 WIFI_COUNTRY_DEFAULT = "DE"  # falls secrets.WIFI_COUNTRY fehlt
 # WLAN beim Start automatisch einschalten (wie beim BME690).
 # Auskommentiert = WLAN startet aus, Taste B schaltet ein.
@@ -164,4 +234,4 @@ WEB_CHART_REFRESH_S = 60     # Auto-Reload der Diagramme
 # Erst scharf schalten (z.B. 8000), wenn das Geraet eigenstaendig laeuft.
 WDT_TIMEOUT_MS = 0
 
-# EOF 2026-11-10
+# EOF 2026-11-15
