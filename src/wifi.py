@@ -24,7 +24,9 @@
 # dem Firmware-Standard, weil die Kalibrierung (TEMP_OFFSET) unter genau
 # diesem Waermezustand entstand. Der BME690 laeuft mit Powersave aus.
 
+import os
 import time
+import machine
 import network
 
 import config
@@ -33,6 +35,28 @@ import secrets
 _OFF = "off"
 _CONNECTING = "connecting"
 _CONNECTED = "connected"
+
+
+_CNT_FILE = "wifi_reset.cnt"   # Zaehler der Hardware-Resets in Folge (Flash)
+
+
+def _cnt_read():
+    try:
+        with open(_CNT_FILE) as f:
+            return int(f.read() or 0)
+    except Exception:
+        return 0
+
+
+def _cnt_write(n):
+    try:
+        if n:
+            with open(_CNT_FILE, "w") as f:
+                f.write(str(n))
+        else:
+            os.remove(_CNT_FILE)
+    except Exception:
+        pass
 
 
 def _country_code():
@@ -49,6 +73,8 @@ class WiFi:
         self._t_check = 0
         self._fails = 0
         self._country_reported = False
+        self._dead = 0                  # Fehlschlaege wegen nicht gestartetem Funkchip
+        self._hw_resets = _cnt_read()   # Hardware-Resets in Folge (ueber Neustart hinweg)
 
     # --- intern -----------------------------------------------------------
 
@@ -111,6 +137,8 @@ class WiFi:
             self.wlan.connect(secrets.WIFI_SSID, secrets.WIFI_PASSWORD)
         except Exception as error:
             print("WLAN-Connect-Fehler:", error)
+            if error.args and error.args[0] == 1:    # EPERM: CYW43 nicht gestartet
+                self._dead += 1
         self.state = _CONNECTING
         self._t_connect = time.ticks_ms()
 
@@ -121,6 +149,7 @@ class WiFi:
         self.note = ""
         self._ip = None
         self._fails = 0
+        self._dead = 0
         self._start_connect()
         print("WLAN: verbinde...")
 
@@ -159,6 +188,10 @@ class WiFi:
                 self.state = _CONNECTED
                 self._ip = self.wlan.ifconfig()[0]
                 self._fails = 0
+                self._dead = 0
+                if self._hw_resets:
+                    self._hw_resets = 0
+                    _cnt_write(0)
                 self.note = ""
                 print("Webserver: http://" + self._ip)
                 return "up"
@@ -167,6 +200,14 @@ class WiFi:
                 short, text = self._status_text()
                 self.note = short
                 print("WLAN: Versuch", self._fails, "erfolglos -", text)
+                if (self._dead >= config.WIFI_DEAD_RESET_AFTER
+                        and self._hw_resets < config.WIFI_HARD_RESETS_MAX):
+                    # Funkchip ist tot (typisch nach Soft-Reboot, Strg+D): nur ein
+                    # echter Reset schaltet ihn wieder durch.
+                    print("WLAN: CYW43 reagiert nicht - Hardware-Reset")
+                    _cnt_write(self._hw_resets + 1)
+                    time.sleep_ms(300)
+                    machine.reset()
                 if self._fails % config.WIFI_RESET_AFTER == 0:
                     print("WLAN: setze Schnittstelle zurueck")
                     try:
@@ -205,4 +246,4 @@ class WiFi:
     def ssid(self):
         return secrets.WIFI_SSID if self.enabled else None
 
-# EOF 2026-09-25
+# EOF 2026-11-16
