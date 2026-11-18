@@ -174,6 +174,10 @@ class Microphone:
         if self._tone is not None and db >= config.MIC_TONE_MIN_DBFS:
             lo, hi = config.PFIFF_BAND_HZ
             self.tone_hz = self._tone(buf, n, mean, rms, dur_us, lo, hi, config.PFIFF_CORR_PCT)
+            if config.PFIFF_DEBUG and not self.tone_hz:
+                import tone
+                zc, hz, cp = tone.dbg
+                print("  kein Ton: %.0f dB  Durchgaenge %d  %d Hz  Reinheit %d %%" % (db, zc, hz, cp))
         return db
 
     def describe(self, dbfs):

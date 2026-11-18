@@ -165,11 +165,11 @@ EARS_RISE_LOUD_DB_MIN = 0.1  # ... bei anhaltendem Laerm (>3 dB ueber Grund) lan
 # PFIFF_DEBUG = True schreibt jede erkannte Tonmessung in die REPL.
 PFIFF_ENABLED = True
 PFIFF_BAND_HZ = (900, 4500)  # erlaubter Frequenzbereich der Grundwelle
-PFIFF_CORR_PCT = 80          # Reinheit des Tons (Autokorrelation in %), kleiner = toleranter
+PFIFF_CORR_PCT = 70          # Reinheit des Tons (Autokorrelation in %), kleiner = toleranter
 PFIFF_MIN_DB = 12.0          # Ton mindestens so viel ueber dem Grundrauschen
-PFIFF_MIN_READS = 4          # Tonmessungen am Stueck (bei 100 ms = 0,4 s)
-PFIFF_GAP_MS = 250           # Luecke, die die Folge noch nicht abreisst
-PFIFF_GLIDE_PCT = 30         # geforderte Aenderung der Tonhoehe in der Folge
+PFIFF_MIN_READS = 3          # Tonmessungen am Stueck (bei 100 ms = 0,4 s)
+PFIFF_GAP_MS = 500           # Luecke, die die Folge noch nicht abreisst
+PFIFF_GLIDE_PCT = 25         # geforderte Aenderung der Tonhoehe in der Folge
 PFIFF_MS = 4500              # so lange zeigen die Augen die Reaktion
 PFIFF_LOCK_MS = 8000         # danach so lange kein neuer Pfiff
 PFIFF_DEBUG = False

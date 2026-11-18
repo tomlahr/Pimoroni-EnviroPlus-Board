@@ -98,7 +98,11 @@ except ImportError:                      # PC-Test ohne MicroPython
         return acc
 
 
+dbg = (0, 0, 0)     # letzte Analyse: (Nulldurchgaenge, Hz, Reinheit %) - nur fuers Abstimmen
+
+
 def tone_hz(buf, n, mean, rms, dur_us, f_min, f_max, corr_pct):
+    global dbg
     """Frequenz (Hz) des reinen Tons im Burst oder 0.
     buf = array('H') der ADC-Werte, mean = Mittelwert, rms = Effektivwert in
     ADC-Stufen, dur_us = Dauer der Aufnahme."""
@@ -112,11 +116,13 @@ def tone_hz(buf, n, mean, rms, dur_us, f_min, f_max, corr_pct):
     first = (p >> 10) & 1023
     last = (p >> 20) & 1023
     span = last - first                    # Abtastwerte zwischen erstem und letztem Durchgang
+    dbg = (zc, 0, 0)
     if zc < 5 or span <= 0:
         return 0
     # Nur die Spanne mit Ton zaehlt: ein Burst, in dem der Ton erst spaet
     # beginnt oder frueh endet, darf die Frequenz nicht nach unten verfaelschen.
     hz = (zc - 1) * n * 500000 // (span * dur_us)
+    dbg = (zc, hz, 0)
     if hz < f_min or hz > f_max:
         return 0
     lag = 2 * span // (zc - 1)             # eine Periode in Abtastwerten
@@ -132,6 +138,7 @@ def tone_hz(buf, n, mean, rms, dur_us, f_min, f_max, corr_pct):
         c = c * n // (n - lg)
         if c > best:
             best = c
+    dbg = (zc, hz, best * 100 // e0)
     return hz if best * 100 >= corr_pct * e0 else 0
 
 # EOF 2026-11-18
