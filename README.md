@@ -21,7 +21,7 @@ It measures temperature, humidity, air pressure, gas resistance, light and sound
 ## Features
 
 - Four LCD pages: Main, Min / Max, Wi-Fi, System
-- Screensaver after 2 minutes of inactivity: two cartoon eyes (white ovals, moving pupils) with an outline in the air quality colour; the eyelids show the mood (open, sceptical, angry, sleepy during warm-up), with randomised blinking and the occasional wink; brightness follows the ambient light. During the night-time Wi-Fi window the eyes fall asleep (lids nearly closed, gentle breathing, a rising "z") at a fixed low brightness
+- Screensaver after 2 minutes of inactivity: two cartoon eyes (white ovals, moving pupils) with an outline in the air quality colour; the eyelids show the mood (open, sceptical, angry, sleepy during warm-up), with randomised blinking and the occasional wink; brightness follows the ambient light. The eyes react to sound relative to the room's noise floor: they listen (wide open) to speech or TV, are startled by a clap or a slammed door, and get annoyed by long continuous noise. From 23:00 to 06:00 (local time) they fall asleep (lids nearly closed, gentle breathing, a rising "z Z Z") at a fixed low brightness; a loud bang makes one eye open briefly. Optional eyebrows and mouth (`EYES_FACE`) follow the same moods: a smile with dimples when the air is good, a wavy mouth when startled or annoyed, a tiny "hmm" movement while listening; in the evening the eyes occasionally yawn (from 21:30) or blow a subtle pulsing kiss with small hearts (18:00–23:00, good air, quiet). A wolf whistle (a pure tone with a rising/falling pitch, detected on the Pico itself) turns the pupils into pulsing hearts with a kissing mouth and floating hearts for a few seconds; steady beeps (microwave, smoke alarm) are ignored. The white of the eyes follows the sun: bright white during the day, a dimmed warm white from shortly before sunset (at the latest 20:00), the lowest still visible level from 22:00, back to warm white at 06:00 and to bright white around sunrise. Sunrise and sunset are calculated locally from `LATITUDE`/`LONGITUDE`; no internet or Home Assistant needed
 - RGB LED shows the air quality (green / yellow / red) at very low brightness on the data pages; off during warm-up and in the screensaver
 - Wi-Fi switches off at night (00:00–06:00 local time, NTP time with CET/CEST) to match the router's Wi-Fi schedule
 - Web dashboard with live values (updated every 5 s) and 3-hour history charts
@@ -30,6 +30,7 @@ It measures temperature, humidity, air pressure, gas resistance, light and sound
 - Relative air quality (IAQ) from gas resistance, with the baseline stored in flash and a 20-minute warm-up after boot
 - Humidity corrected to the calibrated temperature (Magnus formula)
 - Sound level from the on-board microphone
+- Hourly log file `log.csv` on the Pico (one line per hour: climate averages, noise floor, detected sounds and whistles, free RAM, loop timing), rotated to `log.csv.old` at 24 kB
 - Wi-Fi with automatic reconnect and interface reset after repeated failures
 - System page with memory diagnostics, including the largest free heap block to spot fragmentation
 - Optional hardware watchdog
@@ -71,6 +72,8 @@ All pin assignments live in [`src/config.py`](src/config.py).
 
    **Never upload your real `secrets.py` to GitHub.**
 4. Restart the Pico. Wi-Fi starts automatically; the web server starts once connected and the IP address appears on the Wi-Fi page.
+
+> **Note:** After a soft reboot (Ctrl+D in Thonny) the Wi-Fi chip sometimes does not start (`Failed to start CYW43`, connect error `EPERM`). `wifi.py` detects this and triggers a hardware reset (`machine.reset()`), at most `WIFI_HARD_RESETS_MAX` times in a row (counter in `wifi_reset.cnt`, cleared after the next successful connection). For manual restarts prefer unplugging the USB cable or `machine.reset()` in the REPL.
 5. Open that IP address in a browser to see the dashboard.
 
 Wi-Fi starts at boot (`WIFI_AUTOSTART = True` in `config.py`) and switches off between `WIFI_OFF_FROM` and `WIFI_OFF_UNTIL`. The time comes via NTP (`NTP_HOSTS`, default `pool.ntp.org`) as soon as Wi-Fi is connected. Without a valid time the schedule does nothing and Wi-Fi stays on. The Wi-Fi page shows the schedule status.
@@ -120,13 +123,18 @@ The watchdog reboots the Pico if the main loop hangs. It is disabled by default 
 | [`system.py`](src/system.py) | Pico diagnostics: memory, flash, reset cause |
 | [`display.py`](src/display.py) | LCD pages, eyes mode and LED control |
 | [`eyes.py`](src/eyes.py) | Animated eyes screensaver |
+| [`face.py`](src/face.py) | Eyebrows, mouth, yawn and kiss animations (optional, loaded only if enough heap is free) |
+| [`ears.py`](src/ears.py) | Sound reaction: noise floor, listen / startle / annoyed / whistle / night wake-up |
+| [`tone.py`](src/tone.py) | Pure-tone detection for the whistle (zero crossings + autocorrelation, `@micropython.viper`) |
+| [`sun.py`](src/sun.py) | Sunrise/sunset calculation and the time-of-day tint of the eye white |
+| [`hourlog.py`](src/hourlog.py) | Hourly CSV log in flash with size-based rotation |
 | [`web.py`](src/web.py) | Web server, endpoints `/`, `/data` and `/history` |
 | [`index.html`](src/index.html) | Dashboard page; streamed from flash in small chunks to save RAM |
 | [`wifi.py`](src/wifi.py) | Wi-Fi state machine with reconnect |
 | [`wifi_schedule.py`](src/wifi_schedule.py) | Night-time Wi-Fi schedule with NTP and CET/CEST (shared with the BME690 project) |
 | [`secrets_example.py`](src/secrets_example.py) | Template for your Wi-Fi credentials |
 
-The station creates `iaq_baseline.txt` and `rotation.txt` on the Pico by itself; they are not part of this repository.
+The station creates `iaq_baseline.txt`, `rotation.txt`, `log.csv` and `log.csv.old` on the Pico by itself; they are not part of this repository.
 
 ## Related project
 
