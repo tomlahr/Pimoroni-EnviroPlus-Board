@@ -6,6 +6,9 @@
 #
 # Zeitstempel = Beginn des Zeitraums in Ortszeit (braucht NTP). Ohne Uhrzeit
 # wird nach je 60 Minuten Laufzeit geschrieben und "-" eingetragen.
+# Nach jedem Start folgt eine Zeile "# Start;<Reset-Grund>;<Ortszeit>;nach N s".
+# Sie wird erst nach dem ersten Zeitabgleich geschrieben (meist wenige
+# Sekunden nach dem Start); ohne Uhrzeit nach spaetestens _START_WAIT_MS mit "-".
 #
 # Groesse: Ab LOG_MAX_BYTES wird log.csv zu log.csv.old (die aeltere .old
 # faellt weg). Zwei Dateien = ca. 3-4 Wochen Verlauf.
@@ -32,6 +35,7 @@ _HEADER = ("ab;n;temp;hum;hpa;lux;iaq;base_lo;base_hi;peak;knall;nacht;"
            "zuhoer_s;genervt_s;ram_min;block_min;mic_ms;loop_max;ruckler;"
            "augen_pct;wlan;pfiff;ton\n")
 _SLOW_MS = 250
+_START_WAIT_MS = 60000   # so lange auf die Uhrzeit fuer die Startzeile warten
 
 
 def _fmt(v, f):
@@ -45,6 +49,8 @@ class HourLog:
         self._label = "-"
         self._hour = None
         self._t_start = time.ticks_ms()
+        self._t_boot = self._t_start
+        self._start = str(reset_cause)   # Startzeile folgt in tick(), sobald die Uhrzeit da ist
         self._clear()
         try:                                # Spalten geaendert: alte Datei nach .old, neu beginnen
             with open(path) as f:
@@ -53,7 +59,6 @@ class HourLog:
                 self._rotate()
         except OSError:
             pass
-        self._line("# Start;" + str(reset_cause) + "\n")
 
     def _clear(self):
         self._n = 0
@@ -93,6 +98,12 @@ class HourLog:
     # ── Schreiben ─────────────────────────────────────────────
     def tick(self, now, lt, ears, connected):
         """Etwa einmal pro Sekunde aufrufen. lt = Ortszeit-Tupel oder None."""
+        if self._start is not None:
+            waited = time.ticks_diff(now, self._t_boot)
+            if lt is not None or waited >= _START_WAIT_MS:
+                stamp = "%04d-%02d-%02d %02d:%02d:%02d" % lt[:6] if lt else "-"
+                self._line("# Start;%s;%s;nach %d s\n" % (self._start, stamp, waited // 1000))
+                self._start = None
         if lt is not None:
             if self._hour is None:
                 self._hour = lt[3]
@@ -149,4 +160,4 @@ class HourLog:
         except Exception as error:
             print("Log:", error)
 
-# EOF 2026-11-18
+# EOF 2026-11-19
